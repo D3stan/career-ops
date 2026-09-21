@@ -524,25 +524,17 @@ title_filter:
 # The scanner extracts title, URL, and company from results.
 
 search_queries:
-  # -- Visa sponsorship (US) --
-  # Explicitly hunt for roles that sponsor a US work visa. Pair these with the
-  # `visa_filter` block above (require_mention: true) so the scan-side filter
-  # double-checks the description for sponsorship wording. Disabled by default —
-  # flip enabled: true if you need sponsorship.
-  - name: Greenhouse — AI + visa sponsorship
-    query: 'site:boards.greenhouse.io ("AI Engineer" OR "ML Engineer") ("visa sponsorship" OR "H-1B" OR "H1B1")'
-    enabled: false
+  # -- Copenhagen & Denmark Discovery Queries --
+  - name: Greenhouse — Copenhagen & Denmark Tech
+    query: 'site:job-boards.greenhouse.io ("Copenhagen" OR "Denmark") ("Software" OR "Developer" OR "Engineer" OR "Studiejob" OR "Student")'
+    enabled: true
 
-  - name: Ashby — AI + visa sponsorship
-    query: 'site:jobs.ashbyhq.com ("AI Engineer" OR "LLM Engineer") ("visa sponsorship" OR "will sponsor")'
-    enabled: false
+  - name: Ashby — Copenhagen & Denmark Tech
+    query: 'site:jobs.ashbyhq.com ("Copenhagen" OR "Denmark") ("Software" OR "Developer" OR "Engineer" OR "Studiejob" OR "Student")'
+    enabled: true
 
-  - name: Lever — AI + visa sponsorship
-    query: 'site:jobs.lever.co ("AI Engineer" OR "Machine Learning") ("visa sponsorship" OR "H-1B")'
-    enabled: false
-
-  - name: Wellfound - AI + Visa sponsorship
-    query: 'site:wellfound.com "AI Engineer" OR "LLM Engineer" OR "Forward Deployed" ("visa sponsorship" OR "will sponsor")'
+  - name: Lever — Copenhagen & Denmark Tech
+    query: 'site:jobs.lever.co ("Copenhagen" OR "Denmark") ("Software" OR "Developer" OR "Engineer" OR "Studiejob" OR "Student")'
     enabled: true
 
   # --- Healthcare example (uncomment your profession, remove the rest) ---
@@ -1684,26 +1676,9 @@ tracked_companies:
 
   # -- AI Labs & LLM providers --
 
-  - name: Anthropic
-    careers_url: https://job-boards.greenhouse.io/anthropic
-    api: https://boards-api.greenhouse.io/v1/boards/anthropic/jobs
-    enabled: true
 
-  - name: OpenAI
-    careers_url: https://openai.com/careers
-    scan_method: websearch
-    scan_query: 'site:openai.com/careers "Solutions" OR "Forward Deployed" OR "AI Engineer"'
-    enabled: true
 
-  - name: ByteDance
-    careers_url: https://jobs.bytedance.com
-    keywords: ["AI", "大模型", "Agent"]
-    enabled: true
 
-  - name: DeepSeek
-    careers_url: https://app.mokahr.com/social-recruitment/high-flyer/140576
-    keywords: ["AI", "大模型", "Agent"]
-    enabled: true
 
   # -- Voice AI & Conversational AI --
 
@@ -1725,11 +1700,6 @@ tracked_companies:
     notes: "Dublin EMEA. Fin AI agent."
     enabled: true
 
-  - name: Hume AI
-    careers_url: https://job-boards.greenhouse.io/humeai
-    api: https://boards-api.greenhouse.io/v1/boards/humeai/jobs
-    notes: "NYC. Empathic voice AI."
-    enabled: true
 
   - name: ElevenLabs
     careers_url: https://jobs.ashbyhq.com/elevenlabs
@@ -1738,105 +1708,24 @@ tracked_companies:
     notes: "Voice AI TTS leader."
     enabled: true
 
-  - name: Deepgram
-    careers_url: https://jobs.ashbyhq.com/deepgram
-    scan_method: websearch
-    scan_query: 'site:deepgram.com/careers OR "deepgram" "Solutions" OR "AI Engineer" site:jobs.ashbyhq.com'
-    notes: "STT/TTS APIs."
-    enabled: true
 
-  - name: Vapi
-    careers_url: https://jobs.ashbyhq.com/vapi
-    scan_method: websearch
-    scan_query: 'site:jobs.ashbyhq.com/vapi'
-    notes: "Voice AI infrastructure."
-    enabled: true
 
-  - name: Bland AI
-    careers_url: https://jobs.ashbyhq.com/bland
-    scan_method: websearch
-    scan_query: 'site:jobs.ashbyhq.com/bland'
-    notes: "Voice phone agents. $65M Series B."
-    enabled: true
 
   # -- AI-native platforms (FDE/SA teams) --
 
-  - name: Retool
-    careers_url: https://jobs.gem.com/retool
-    provider: gem
-    notes: "London. Popularized Deployed Engineer role."
-    enabled: true
 
-  - name: Gem
-    api: https://api.gem.com/job_board/v0/gem/job_posts/
-    provider: gem
-    notes: "San Francisco. Recruiting platform — example of Gem's documented REST Job Board API (verified vanity path, not guessed from the company name)."
-    enabled: true
 
-  - name: Airtable
-    careers_url: https://job-boards.greenhouse.io/airtable
-    api: https://boards-api.greenhouse.io/v1/boards/airtable/jobs
-    notes: "No-code + AI platform."
-    enabled: true
 
-  - name: Vercel
-    careers_url: https://job-boards.greenhouse.io/vercel
-    api: https://boards-api.greenhouse.io/v1/boards/vercel/jobs
-    notes: "AI SDK, v0.dev. Frontend AI tooling."
-    enabled: true
 
-  - name: Temporal
-    careers_url: https://job-boards.greenhouse.io/temporal
-    api: https://boards-api.greenhouse.io/v1/boards/temporal/jobs
-    notes: "Workflow orchestration."
-    enabled: true
 
-  - name: Arize AI
-    careers_url: https://job-boards.greenhouse.io/arizeai
-    api: https://boards-api.greenhouse.io/v1/boards/arizeai/jobs
-    notes: "LLMOps / AI observability."
-    enabled: true
 
-  - name: RunPod
-    careers_url: https://job-boards.greenhouse.io/runpod
-    api: https://boards-api.greenhouse.io/v1/boards/runpod/jobs
-    notes: "GPU cloud for AI."
-    enabled: true
 
-  - name: Weights & Biases (CoreWeave)
-    careers_url: https://job-boards.greenhouse.io/coreweave
-    api: https://boards-api.greenhouse.io/v1/boards/coreweave/jobs
-    notes: "Acquired by CoreWeave (announced March 2025, closed May 2025). W&B roles now live on CoreWeave's Greenhouse board. Old Lever URL (jobs.lever.co/wandb) returns 404."
-    enabled: true
 
-  - name: Glean
-    careers_url: https://job-boards.greenhouse.io/gleanwork
-    api: https://boards-api.greenhouse.io/v1/boards/gleanwork/jobs
-    notes: "Enterprise AI search."
-    enabled: true
 
   # -- Contact Center AI & CX --
 
-  - name: Ada
-    careers_url: https://job-boards.greenhouse.io/ada
-    scan_method: websearch
-    scan_query: '"ada.cx" OR "ada" "AI" "Solutions" OR "Engineer" site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io'
-    notes: "Toronto + remote. AI customer service."
-    enabled: true
 
-  - name: LivePerson
-    careers_url: https://liveperson.com/company/careers
-    scan_method: websearch
-    scan_query: 'site:liveperson.com/careers OR "liveperson" "Solutions" OR "AI" site:job-boards.greenhouse.io'
-    notes: "Remote EMEA. Conversational AI enterprise."
-    enabled: true
 
-  - name: Sierra
-    careers_url: https://jobs.ashbyhq.com/sierra
-    scan_method: websearch
-    scan_query: '"sierra.ai" "AI" "Forward Deployed" OR "Applied" OR "Solutions" site:jobs.ashbyhq.com'
-    notes: "Bret Taylor (ex-CEO Salesforce). AI customer agents."
-    enabled: true
 
   - name: Decagon
     careers_url: https://jobs.ashbyhq.com/decagon
@@ -1854,40 +1743,10 @@ tracked_companies:
     notes: "Lisbon. Contact center AI. EMEA friendly."
     enabled: true
 
-  - name: Twilio
-    careers_url: https://jobs.twilio.com
-    scan_method: websearch
-    scan_query: 'site:jobs.twilio.com "AI" OR "Voice" "Solutions" OR "Architect"'
-    notes: "Voice/messaging infrastructure."
-    enabled: true
 
-  - name: Dialpad
-    careers_url: https://www.dialpad.com/careers
-    scan_method: websearch
-    scan_query: '"dialpad" "AI" "Solutions" OR "Engineer" site:job-boards.greenhouse.io OR site:jobs.ashbyhq.com'
-    notes: "Voice AI for business comms."
-    enabled: true
 
-  - name: Gong
-    careers_url: https://www.gong.io/careers
-    scan_method: websearch
-    scan_query: 'site:gong.io/careers "AI" OR "Solutions" OR "Architect"'
-    notes: "Revenue intelligence with voice AI."
-    enabled: true
 
-  - name: Genesys
-    careers_url: https://www.genesys.com/careers
-    scan_method: websearch
-    scan_query: 'site:genesys.com/careers "AI" "Solutions Architect" OR "AI Engineer"'
-    notes: "Contact center cloud + AI."
-    enabled: true
 
-  - name: Salesforce
-    careers_url: https://careers.salesforce.com
-    scan_method: websearch
-    scan_query: 'site:careers.salesforce.com "Forward Deployed" OR "AI Engineer" OR "Agentforce"'
-    notes: "Agentforce = AI agents platform."
-    enabled: true
 
   # -- AI infra & LLMOps --
 
@@ -1898,12 +1757,6 @@ tracked_companies:
     notes: "Berlin. LLMOps / observability."
     enabled: true
 
-  - name: Lindy
-    careers_url: https://jobs.ashbyhq.com/lindy
-    scan_method: websearch
-    scan_query: '"lindy.ai" "AI" "Forward Deployed" OR "Solutions" site:jobs.ashbyhq.com'
-    notes: "AI agent management platform."
-    enabled: true
 
   - name: Cognigy
     careers_url: https://careers.cognigy.com
@@ -1927,12 +1780,6 @@ tracked_companies:
     notes: "Berlin + remote EU/US. Workflow automation."
     enabled: true
 
-  - name: Zapier
-    careers_url: https://jobs.ashbyhq.com/zapier
-    scan_method: websearch
-    scan_query: 'site:jobs.ashbyhq.com/zapier'
-    notes: "Remote-first. Automation platform leader."
-    enabled: true
 
   - name: Make.com (Celonis)
     careers_url: https://www.make.com/en/careers
@@ -1941,11 +1788,6 @@ tracked_companies:
     notes: "Celonis parent company. Automation platform."
     enabled: true
 
-  - name: Boomi
-    careers_url: https://job-boards.greenhouse.io/boomilp
-    api: https://boards-api.greenhouse.io/v1/boards/boomilp/jobs
-    notes: "Integration and automation platform."
-    enabled: true
 
   # -- Ashby-based (Playwright direct) --
 
@@ -1954,15 +1796,7 @@ tracked_companies:
     notes: "AI/LLM provider. Toronto + remote."
     enabled: true
 
-  - name: LangChain
-    careers_url: https://jobs.ashbyhq.com/langchain
-    notes: "LangChain/LangSmith framework."
-    enabled: true
 
-  - name: Pinecone
-    careers_url: https://jobs.ashbyhq.com/pinecone
-    notes: "Vector database."
-    enabled: true
 
   # -- Lever-based (Playwright direct) --
 
@@ -1978,45 +1812,12 @@ tracked_companies:
 
   # -- Canada / Vancouver tech & AI --
 
-  - name: Later
-    careers_url: https://job-boards.greenhouse.io/later
-    api: https://boards-api.greenhouse.io/v1/boards/later/jobs
-    notes: "Vancouver/Toronto. Social media and creator platform."
-    enabled: true
 
-  - name: Safari AI
-    careers_url: https://job-boards.greenhouse.io/safariai
-    api: https://boards-api.greenhouse.io/v1/boards/safariai/jobs
-    notes: "Miami HQ / Vancouver engineering. Computer vision AI for operations in the physical economy."
-    enabled: true
 
-  - name: Hootsuite
-    careers_url: https://job-boards.greenhouse.io/hootsuite
-    api: https://boards-api.greenhouse.io/v1/boards/hootsuite/jobs
-    notes: "Vancouver. Social media management platform."
-    enabled: true
 
-  - name: Klue
-    careers_url: https://jobs.ashbyhq.com/klue
-    notes: "Vancouver. Competitive intelligence SaaS."
-    enabled: true
 
-  - name: Glacis AI
-    careers_url: https://jobs.ashbyhq.com/glacis-ai
-    notes: "Ho Chi Minh City. AI agents for supply chain and logistics workflows."
-    enabled: true
 
-  - name: Sanctuary AI
-    careers_url: https://jobs.lever.co/sanctuary
-    notes: "Vancouver. Humanoid robotics and embodied AI."
-    enabled: true
 
-  - name: Semios
-    careers_url: https://apply.workable.com/semios/
-    scan_method: websearch
-    scan_query: 'site:apply.workable.com/semios'
-    notes: "Vancouver. Agtech and crop intelligence platform."
-    enabled: true
 
   # -- European tech (EMEA-friendly) --
 
@@ -2323,12 +2124,6 @@ tracked_companies:
     notes: "Germany. VW Group software. Board on the VW Group SuccessFactors portal."
     enabled: true
 
-  - name: Shopify
-    careers_url: https://www.shopify.com/careers
-    scan_method: websearch
-    scan_query: 'site:shopify.com/careers OR site:shopify.com/careers/* "Engineer" OR "Backend" OR "Platform"'
-    notes: "Remote-first. E-commerce platform. Greenhouse-backed SPA."
-    enabled: true
 
   - name: Aiven
     careers_url: https://aiven.io/careers
@@ -2389,38 +2184,10 @@ tracked_companies:
 
   # -- AI / Developer Tools --
 
-  - name: Perplexity
-    careers_url: https://jobs.ashbyhq.com/perplexity
-    scan_method: websearch
-    scan_query: ‘site:jobs.ashbyhq.com/perplexity "AI" OR "Applied AI" OR "Forward Deployed" OR "Engineer"’
-    notes: "AI-native search and enterprise AI platform."
-    enabled: true
 
-  - name: Clay Labs
-    careers_url: https://jobs.ashbyhq.com/claylabs
-    scan_method: websearch
-    scan_query: 'site:jobs.ashbyhq.com/claylabs "AI" OR "Developer Experience" OR "Growth" OR "Engineer"'
-    notes: "AI-native GTM and workflow automation platform."
-    enabled: true
 
-  - name: Runway
-    careers_url: https://job-boards.greenhouse.io/runwayml
-    api: https://boards-api.greenhouse.io/v1/boards/runwayml/jobs
-    notes: "Generative AI video and creative tooling platform."
-    enabled: true
 
-  - name: Hightouch
-    careers_url: https://job-boards.greenhouse.io/hightouch
-    api: https://boards-api.greenhouse.io/v1/boards/hightouch/jobs
-    notes: "Data activation platform with AI agents and solutions engineering roles."
-    enabled: true
 
-  - name: WorkOS
-    careers_url: https://jobs.ashbyhq.com/workos
-    scan_method: websearch
-    scan_query: 'site:jobs.ashbyhq.com/workos "Solutions Engineer" OR "Developer Success" OR "Engineer"'
-    notes: "Developer tools and enterprise-ready auth/platform APIs."
-    enabled: true
 
   # -- Dev Tools / AI Infra (DevRel, SA, FDE focus) --
 
@@ -2431,46 +2198,11 @@ tracked_companies:
     notes: "Open-source Firebase alternative. Remote-first. Postgres + Auth + Storage. Strong DevRel/DX hiring."
     enabled: true
 
-  - name: Resend
-    careers_url: https://jobs.ashbyhq.com/resend
-    scan_method: websearch
-    scan_query: 'site:jobs.ashbyhq.com/resend'
-    notes: "Email API for developers. Remote-first. DX/DevRel focused."
-    enabled: true
 
-  - name: Clerk
-    careers_url: https://jobs.ashbyhq.com/clerk
-    scan_method: websearch
-    scan_query: 'site:jobs.ashbyhq.com/clerk'
-    notes: "Auth & user management for developers. SE / TAM / PM roles."
-    enabled: true
 
-  - name: Inngest
-    careers_url: https://jobs.ashbyhq.com/inngest
-    scan_method: websearch
-    scan_query: 'site:jobs.ashbyhq.com/inngest'
-    notes: "Durable workflow engine for serverless. DX/DevRel/Engineering hiring."
-    enabled: true
 
-  - name: PlanetScale
-    careers_url: https://job-boards.greenhouse.io/planetscale
-    api: https://boards-api.greenhouse.io/v1/boards/planetscale/jobs
-    notes: "Serverless MySQL platform. Customer Engineering, Engineering, Sales."
-    enabled: true
 
-  - name: Zep AI
-    careers_url: https://www.getzep.com/careers
-    scan_method: websearch
-    scan_query: '"Zep" "Forward Deployed" OR "Developer Relations" OR "Founding" site:workatastartup.com OR site:getzep.com'
-    notes: "Context engineering platform for AI agents. YC W24. Lead FDE + DevRel Lead roles. US-only currently."
-    enabled: true
 
-  - name: Maxim AI
-    careers_url: https://www.getmaxim.ai/careers
-    scan_method: websearch
-    scan_query: '"Maxim AI" OR "getmaxim" careers "engineer" OR "product"'
-    notes: "AI evaluation and observability platform. Bangalore-based, mostly on-site."
-    enabled: true
 
   # ============================================================
   # -- Türkiye / Turkey market
