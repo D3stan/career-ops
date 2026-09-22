@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, X, Loader2, AlertTriangle } from "lucide-react";
+import { Check, X, Loader2, AlertTriangle, HelpCircle } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
 import { jobErrorHint } from "@/lib/job-error-hint.mjs";
 import { cn } from "@/lib/cn";
@@ -103,6 +103,8 @@ export function WorkerCard({
           <Loader2 className="size-3 shrink-0 animate-spin text-brand" />
         ) : job.status === "error" ? (
           <AlertTriangle className={cn("size-3 shrink-0", tone.icon)} />
+        ) : job.status === "unknown" ? (
+          <HelpCircle className={cn("size-3 shrink-0", tone.icon)} />
         ) : (
           <Check className={cn("size-3 shrink-0", tone.icon)} />
         )}

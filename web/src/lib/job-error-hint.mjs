@@ -14,8 +14,6 @@
 //     "The CLI produced no output — is it installed and authenticated? (...)"
 //   Connection dropped mid-stream, CLI never got a chance to fail -> "connection":
 //     "Connection error"                                                  (job-store.tsx)
-//   Page reload orphaned a running job -> "interrupted":
-//     "Interrupted (page reloaded)"                                       (job-store.tsx restore effect)
 //   Everything else (bad input, missing CV, no report written, etc.) -> null;
 //   the error text itself is the explanation.
 
@@ -30,7 +28,6 @@ const AUTH_PATTERN =
 const HINTS = {
   auth: { kind: "auth", text: "Sign your CLI in from Config, then re-run." },
   connection: { kind: "connection", text: "Lost connection to the local server — re-run." },
-  interrupted: { kind: "interrupted", text: "The run was interrupted — re-run it." },
 };
 
 /** The message set on the job's last step — the authoritative terminal cause. */
@@ -45,7 +42,6 @@ export function jobErrorHint(job) {
   const label = lastStepLabel(job);
   if (!label) return null;
   if (label === "Connection error") return HINTS.connection;
-  if (label === "Interrupted (page reloaded)") return HINTS.interrupted;
   if (AUTH_PATTERN.test(label)) return HINTS.auth;
   return null;
 }

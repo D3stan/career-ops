@@ -15,7 +15,7 @@ export type Job = {
   input?: string; // the URL/posting it processed (links inbox rows to their worker)
   kind?: string;
   batchId?: string; // groups jobs fired together (e.g. "evaluate all Anthropic")
-  status: "running" | "done" | "error";
+  status: "running" | "done" | "error" | "unknown"; // "unknown": job outlived its tab (reload/close) — may have finished on the server
   steps: JobStep[];
   text: string;
   result?: JobResult;
@@ -67,8 +67,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(JOBS_KEY);
       const arr = raw ? JSON.parse(raw) : null;
       if (Array.isArray(arr)) {
-        // anything left "running" from a previous session is stale → mark interrupted
-        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: "Interrupted (page reloaded)", ts: Date.now() }] } : j)));
+        // A job still "running" from a previous session means this TAB's view
+        // of it is gone — not that the job itself stopped: /api/run no longer
+        // kills the agent CLI on a browser disconnect, so the evaluation kept
+        // running on the server. Only the live progress feed was lost.
+        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "unknown", steps: [...(j.steps || []), { kind: "status", label: "Reload closed this tab's view — the evaluation kept running on the server. Check Pipeline for the result.", ts: Date.now() }] } : j)));
       }
     } catch {
       /* ignore */

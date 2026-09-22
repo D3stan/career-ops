@@ -17,6 +17,7 @@ import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
+import { createRunLifecycle } from "@/lib/core/run-stream-lifecycle.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -192,15 +193,9 @@ export async function POST(req: Request) {
   // Stream-lifetime state lives outside start() so cancel() (client disconnect)
   // can stop every timer before the child's late handlers run. send() is also
   // try/catch'd so a late enqueue cannot throw uncaught (see #1155).
-  let closed = false;
+  const lifecycle = createRunLifecycle();
   let killer: ReturnType<typeof setTimeout> | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
-  // pdf-kind's render+mark work (renderPdf, below) keeps running detached even
-  // after the agent child closes — and even after a client disconnect fires
-  // cancel(). Track its promise so cancel() can defer releasing writeToken
-  // until that work actually settles, instead of releasing the tracker-delete
-  // guard while mark-pdf-ready.mjs is still actively writing applications.md.
-  let pdfRenderPromise: Promise<void> | null = null;
   let writeTokenReleased = false;
   const releaseWriteTokenOnce = () => {
     if (writeToken !== null && !writeTokenReleased) {
@@ -263,7 +258,7 @@ export async function POST(req: Request) {
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
       const send = (obj: unknown) => {
-        if (closed) return;
+        if (lifecycle.isStreamClosed()) return;
         try {
           controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
         } catch {
@@ -271,7 +266,7 @@ export async function POST(req: Request) {
           // close(): the child can still run for minutes (maxDuration 800s), and
           // a user retrying a failed run would otherwise accumulate one live
           // timer per abandoned request.
-          closed = true;
+          lifecycle.onStreamWriteFailed();
           if (heartbeat) clearInterval(heartbeat);
         }
       };
@@ -298,13 +293,16 @@ export async function POST(req: Request) {
       // Unknown event types are ignored by the client's switch, so old tabs are safe.
       heartbeat = setInterval(() => send({ type: "keepalive" }), 10_000);
       const close = () => {
-        if (!closed) {
-          closed = true;
+        // settleOnce is the ONLY place the job's real resources (the kill
+        // timer, the tracker write-token) get released — it runs from the
+        // child's own close/error handlers (or renderPdf's finally), never
+        // from a browser disconnect. See run-stream-lifecycle.mjs.
+        lifecycle.settleOnce(() => {
           if (heartbeat) clearInterval(heartbeat);
           if (killer) clearTimeout(killer);
           releaseWriteTokenOnce();
           try { controller.close(); } catch { /* */ }
-        }
+        });
       };
       // pdf's CV arrives inline in a <<cv-html>> envelope instead of being written
       // by the agent (#2185). The filter keeps every byte for the backend while
@@ -364,7 +362,12 @@ export async function POST(req: Request) {
       };
 
       child.stdout.on("data", (chunk: string) => {
-        if (closed) return;
+        // Deliberately NOT gated on lifecycle.isStreamClosed(): parsing must
+        // continue after a disconnect so emittedText/sawError/token
+        // accounting stay correct for the close-time honesty gate below, and
+        // so pdf mode's cvFilter still sees the whole <<cv-html>> envelope
+        // even if the browser left partway through. send()/sendAgentText()
+        // already no-op once the stream is closed, so this costs nothing.
         if (!spec.parseEvent) {
           emittedText = true;
           sendAgentText(chunk);
@@ -436,12 +439,14 @@ export async function POST(req: Request) {
       child.on("close", (code) => {
         // A trailing line with no newline would otherwise never be tested.
         if (stderrBuf) { flagStderrLine(stderrBuf); stderrBuf = ""; }
-        // A client disconnect can fire cancel() (which kills `child`) before
-        // this event finally arrives — killing a process doesn't make its
-        // 'close' event disappear, just delays it. Without this guard a pdf
-        // run could still start a brand-new render (and re-touch the tracker)
-        // after the stream — and its writeToken guard — is already gone.
-        if (closed) return;
+        // child.on("error") may already have settled this run (see below). If
+        // 'close' still arrives afterward, the pdf branch below has real side
+        // effects (saveCv, kicking off a new render) — re-entering it after
+        // settle must be refused, not just re-messaging an already-closed
+        // stream. A browser disconnect alone does NOT settle, so this guard
+        // no longer fires on a plain reload — the job runs this handler for
+        // real when it actually finishes.
+        if (lifecycle.isSettled()) return;
         // A timeout is the ROOT cause behind every "no report / not clean"
         // symptom the gates below test, so classify it FIRST, for any kind.
         // Otherwise a run we cut off at the time limit reads as "the CLI couldn't
@@ -505,9 +510,12 @@ export async function POST(req: Request) {
           } else {
             sendWarnings(envelope.warnings);
             if (saveCv(pdfPaths, envelope)) {
-              // Tracked so cancel() can defer releasing writeToken until this
-              // settles; close() happens once rendering finishes, not here.
-              pdfRenderPromise = renderPdf(pdfPaths, envelope.format);
+              // Fire-and-forget: renderPdf keeps running detached even after
+              // this stream closes (browser disconnect or otherwise) — its
+              // own finally{close()} settles the job (releases the write
+              // token, etc.) once rendering actually finishes, independent
+              // of whether anyone is still listening.
+              renderPdf(pdfPaths, envelope.format);
               return;
             }
             // saveCv already streamed the specific reason.
@@ -541,18 +549,16 @@ export async function POST(req: Request) {
       });
     },
     cancel() {
-      closed = true;
+      // A browser disconnect (tab reload/close, lost connection) stops the
+      // STREAM, never the JOB: the agent CLI keeps running and writes its
+      // report / merges the tracker exactly as if the tab were still open.
+      // killer is deliberately left running — once nobody's watching, it's
+      // the only thing left that can still stop a truly hung agent. The
+      // write token is released only when the job actually finishes, via
+      // close() (called from the child's own close/error handlers, or
+      // renderPdf's finally) — never from here.
+      lifecycle.onDisconnect();
       if (heartbeat) clearInterval(heartbeat);
-      if (killer) clearTimeout(killer);
-      try { child.kill("SIGTERM"); } catch { /* ignore */ }
-      if (pdfRenderPromise) {
-        // Render/mark keeps running after this client disconnects — wait for
-        // it to settle before releasing the guard, so a concurrent tracker
-        // delete can't race mark-pdf-ready.mjs's still-in-flight write.
-        pdfRenderPromise.finally(releaseWriteTokenOnce);
-      } else {
-        releaseWriteTokenOnce();
-      }
     },
   });
 

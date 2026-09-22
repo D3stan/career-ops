@@ -4,7 +4,7 @@ import { use } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X } from "lucide-react";
+import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, HelpCircle } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +41,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               <><Loader2 className="size-3 animate-spin text-brand" /> working</>
             ) : job.status === "done" ? (
               <><Check className="size-3 text-emerald-500" /> done</>
+            ) : job.status === "unknown" ? (
+              <><HelpCircle className="size-3 text-zinc-400" /> unknown</>
             ) : (
               <><X className="size-3 text-red-400" /> error</>
             )}
