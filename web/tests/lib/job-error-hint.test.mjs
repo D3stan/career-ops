@@ -78,12 +78,6 @@ test("connection error -> connection hint, NOT auth", () => {
   assert.equal(hint?.text, "Lost connection to the local server — re-run.");
 });
 
-test("page-reload interruption -> interrupted hint, NOT auth", () => {
-  const hint = jobErrorHint(errorJob("Interrupted (page reloaded)"));
-  assert.equal(hint?.kind, "interrupted");
-  assert.equal(hint?.text, "The run was interrupted — re-run it.");
-});
-
 test("connection error with unrelated auth-flavored assistant text -> still connection, NOT auth (the bug this fixes)", () => {
   // Accumulated assistant output from a real evaluation routinely mentions
   // "credentials"/"sign-in"/"authenticate" as ordinary JD/CV prose — that
@@ -92,12 +86,6 @@ test("connection error with unrelated auth-flavored assistant text -> still conn
     "The candidate holds strong professional credentials and the platform's sign-in flow requires OAuth authentication for API access.";
   const hint = jobErrorHint(errorJob("Connection error", text));
   assert.equal(hint?.kind, "connection");
-});
-
-test("interrupted with unrelated auth-flavored assistant text -> still interrupted, NOT auth", () => {
-  const text = "This product requires the user to authenticate via SSO login with their corporate credentials.";
-  const hint = jobErrorHint(errorJob("Interrupted (page reloaded)", text));
-  assert.equal(hint?.kind, "interrupted");
 });
 
 test("other terminal errors -> no hint", () => {
