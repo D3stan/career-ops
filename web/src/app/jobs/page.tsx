@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Check, AlertTriangle, Loader2, Trash2 } from "lucide-react";
+import { Check, AlertTriangle, Loader2, Trash2, HelpCircle } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { pillTone } from "@/components/jobs/worker-pills";
 import { cn } from "@/lib/cn";
@@ -50,6 +50,8 @@ export default function JobsHistory() {
                     <Loader2 className="size-4 shrink-0 animate-spin text-brand" />
                   ) : j.status === "error" ? (
                     <AlertTriangle className="size-4 shrink-0 text-red-400" />
+                  ) : j.status === "unknown" ? (
+                    <HelpCircle className="size-4 shrink-0 text-zinc-400" />
                   ) : (
                     <Check className="size-4 shrink-0 text-emerald-500" />
                   )}
