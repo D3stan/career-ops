@@ -2115,14 +2115,14 @@ tracked_companies:
     provider: successfactors
     api: https://jobs.bmwgroup.com
     notes: "Munich/Remote DE. Automotive software. SuccessFactors portal."
-    enabled: true
+    enabled: false
 
   - name: CARIAD (Volkswagen)
     careers_url: https://jobs.volkswagen-group.com/cariad
     provider: successfactors
     api: https://jobs.volkswagen-group.com
     notes: "Germany. VW Group software. Board on the VW Group SuccessFactors portal."
-    enabled: true
+    enabled: false
 
 
   - name: Aiven
