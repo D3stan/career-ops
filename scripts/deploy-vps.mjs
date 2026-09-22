@@ -22,6 +22,9 @@
  */
 
 import { execFileSync } from 'child_process';
+import { writeFileSync, openSync, closeSync, unlinkSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 const HOST = process.env.DEPLOY_HOST || 'vps';
 const REMOTE_PATH = process.env.DEPLOY_PATH || '/home/deploy/career-ops';
@@ -102,11 +105,31 @@ if echo "$CHANGED" | grep -q '^web/'; then
 fi
 
 echo "-- restarting ${SERVICE} --"
-sudo systemctl restart '${SERVICE}'
-sudo systemctl is-active '${SERVICE}'
+sudo -n systemctl restart '${SERVICE}'
+sudo -n systemctl status '${SERVICE}'
 echo "Deployed $BEFORE -> $AFTER"
 `;
 
-run('ssh', [HOST, 'bash', '-se'], { input: remoteScript });
+// Fed to the remote bash as a file, not via execFileSync's `input` option:
+// piping `input` through ssh has a data-loss race (the local write can close
+// before the SSH channel is ready to forward it), which silently no-ops the
+// whole deploy -- confirmed by hand, twice. A real fd has no such race.
+//
+// BatchMode disables any interactive prompt (password/passphrase/host-key
+// confirmation) so a misconfigured connection fails fast instead of hanging.
+const scriptFile = join(tmpdir(), `deploy-vps-${process.pid}-${Date.now()}.sh`);
+writeFileSync(scriptFile, remoteScript, { mode: 0o600 });
+try {
+  const fd = openSync(scriptFile, 'r');
+  try {
+    run('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', HOST, 'bash', '-se'], {
+      stdio: [fd, 'inherit', 'inherit'],
+    });
+  } finally {
+    closeSync(fd);
+  }
+} finally {
+  unlinkSync(scriptFile);
+}
 
 console.log('\ndeploy-vps: done.');
