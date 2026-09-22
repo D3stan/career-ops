@@ -69,6 +69,11 @@ Config is overridable via env vars if the host/path/service ever changes —
 see the header of `deploy-vps.mjs`: `DEPLOY_HOST`, `DEPLOY_PATH`,
 `DEPLOY_SERVICE`, `DEPLOY_BRANCH`.
 
+Pass `--force` (`npm run deploy -- --force`) to skip the uncommitted-changes
+check, e.g. when you have unrelated WIP sitting in the tree. It only bypasses
+the prompt — deploy ships commits, not working-tree state, so uncommitted
+changes are never sent to the VPS either way, force or not.
+
 ## Checking it worked
 
 ```bash

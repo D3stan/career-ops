@@ -13,6 +13,12 @@
  *   DEPLOY_PATH     remote repo path        default: /home/deploy/career-ops
  *   DEPLOY_SERVICE  systemd unit to restart default: career-ops-web.service
  *   DEPLOY_BRANCH   branch to deploy        default: main
+ *
+ * Flags:
+ *   --force, -f   skip the dirty-working-tree check. Deploy only ever ships
+ *                 committed, pushed commits -- uncommitted changes are never
+ *                 sent either way, so this just bypasses the safety prompt,
+ *                 not the git push/pull mechanics.
  */
 
 import { execFileSync } from 'child_process';
@@ -21,6 +27,7 @@ const HOST = process.env.DEPLOY_HOST || 'vps';
 const REMOTE_PATH = process.env.DEPLOY_PATH || '/home/deploy/career-ops';
 const SERVICE = process.env.DEPLOY_SERVICE || 'career-ops-web.service';
 const BRANCH = process.env.DEPLOY_BRANCH || 'main';
+const FORCE = process.argv.slice(2).some((arg) => arg === '--force' || arg === '-f');
 
 function run(cmd, args, opts = {}) {
   return execFileSync(cmd, args, { stdio: 'inherit', ...opts });
@@ -44,7 +51,15 @@ if (currentBranch !== BRANCH) {
 
 const dirty = runCapture('git', ['status', '--porcelain']);
 if (dirty) {
-  fail('working tree has uncommitted changes. Commit or stash before deploying:\n' + dirty);
+  if (!FORCE) {
+    fail(
+      'working tree has uncommitted changes. Commit or stash before deploying, ' +
+        'or pass --force to deploy the last commit anyway (uncommitted changes ' +
+        "are never shipped either way):\n" + dirty
+    );
+  }
+  console.log('-- --force: ignoring uncommitted changes below (they will NOT be deployed) --');
+  console.log(dirty);
 }
 
 console.log(`== 2/3: pushing ${BRANCH} to origin ==`);
