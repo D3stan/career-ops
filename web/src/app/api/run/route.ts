@@ -196,12 +196,6 @@ export async function POST(req: Request) {
   const lifecycle = createRunLifecycle();
   let killer: ReturnType<typeof setTimeout> | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
-  // pdf-kind's render+mark work (renderPdf, below) keeps running detached even
-  // after the agent child closes — and even after a client disconnect fires
-  // cancel(). Track its promise so cancel() can defer releasing writeToken
-  // until that work actually settles, instead of releasing the tracker-delete
-  // guard while mark-pdf-ready.mjs is still actively writing applications.md.
-  let pdfRenderPromise: Promise<void> | null = null;
   let writeTokenReleased = false;
   const releaseWriteTokenOnce = () => {
     if (writeToken !== null && !writeTokenReleased) {
@@ -516,9 +510,12 @@ export async function POST(req: Request) {
           } else {
             sendWarnings(envelope.warnings);
             if (saveCv(pdfPaths, envelope)) {
-              // Tracked so cancel() can defer releasing writeToken until this
-              // settles; close() happens once rendering finishes, not here.
-              pdfRenderPromise = renderPdf(pdfPaths, envelope.format);
+              // Fire-and-forget: renderPdf keeps running detached even after
+              // this stream closes (browser disconnect or otherwise) — its
+              // own finally{close()} settles the job (releases the write
+              // token, etc.) once rendering actually finishes, independent
+              // of whether anyone is still listening.
+              renderPdf(pdfPaths, envelope.format);
               return;
             }
             // saveCv already streamed the specific reason.
