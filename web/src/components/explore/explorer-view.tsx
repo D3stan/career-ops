@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import type { Application, InboxJob } from "@/lib/career-ops";
@@ -15,6 +16,7 @@ import { ExploreModeToggle } from "./explore-mode-toggle";
 import { AiSearchBox } from "./ai-search-box";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
+import { ScanJobBanner, useScanJob } from "./scan-job";
 
 // Same shape as core normalizeTextKey(s, " ") — never [^a-z0-9] (#2666).
 const norm = (s: string) => normalizeTextKey(s, " ");
@@ -39,7 +41,7 @@ export function ExplorerView({
   appsSnapshot: Application[];
   rootExists: boolean;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
+  const { filters, setFilters, initFilters, phase, running, offers, loadFresh, status, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
   const scanNote =
     companiesScanned > 0
       ? `Scanned ${companiesScanned.toLocaleString()}${companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} compan${companiesScanned === 1 ? "y" : "ies"}${partial ? " · some sources were unreachable" : ""}.`
@@ -48,6 +50,21 @@ export function ExplorerView({
   const [refineOpen, setRefineOpen] = useState(false);
   const [cli, setCli] = useState<{ id: string | null; name?: string }>({ id: null });
   const [firstRun, setFirstRun] = useState(false);
+  // Discover runs as a detached background scan (lib/core/scan-job.ts): a full
+  // sweep takes far longer than a request can stay open. When one this page
+  // watched finishes, reload the fresh list it just filled.
+  const router = useRouter();
+  // router.refresh() re-reads the server snapshot too, so the scan's new
+  // pipeline rows show as "In pipeline" rather than "Add to pipeline".
+  const scanJob = useScanJob(() => {
+    router.refresh();
+    void loadFresh();
+  });
+  const startJobScan = scanJob.start; // stable (useCallback)
+  const startScan = (f: ExploreFilters = filters) => {
+    setRefineOpen(false);
+    void scanJob.start(f);
+  };
 
   useEffect(() => {
     try {
@@ -78,15 +95,18 @@ export function ExplorerView({
       initFilters(seed.filters);
       void loadFresh();
     } else {
-      initFilters(sp.toString() ? paramsToFilters(sp) : seed.filters);
-      // Onboarding hand-off: ?run=1 auto-fires the free scan + flags the first-run
-      // banner (the "matches found from your CV, free" reveal).
+      const f = sp.toString() ? paramsToFilters(sp) : seed.filters;
+      initFilters(f);
+      setMode("scan");
+      // Explore opens on what past scans already found (free, instant) rather than
+      // on an empty form. Onboarding's ?run=1 additionally kicks off a scan.
+      void loadFresh();
       if (sp.get("run") === "1") {
         setFirstRun(true);
-        void discover();
+        void startJobScan(f);
       }
     }
-  }, [seed.filters, initFilters, setMode, setAiIntent, discover, loadFresh]);
+  }, [seed.filters, initFilters, setMode, setAiIntent, loadFresh, startJobScan]);
 
   const inboxUrls = useMemo(() => new Set(inboxSnapshot.map((j) => j.url)), [inboxSnapshot]);
   const enriched: EnrichedOffer[] = useMemo(
@@ -167,6 +187,7 @@ export function ExplorerView({
         )
       ) : (
         <>
+          <ScanJobBanner scan={scanJob} />
           {isResults ? (
             <div className="mb-6 rounded-xl border border-border bg-surface/30">
               <button type="button" onClick={() => setRefineOpen((v) => !v)} className="flex w-full items-center gap-2 px-4 py-3 text-sm font-medium text-foreground">
@@ -176,7 +197,7 @@ export function ExplorerView({
               {refineOpen && (
                 <div className="space-y-4 border-t border-border p-4">
                   <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
-                  <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Re-cast (free)" />
+                  <DiscoverBar canDiscover={canDiscover && !scanJob.running} onDiscover={() => startScan()} label={scanJob.running ? "Scan running…" : "Scan again (free)"} />
                 </div>
               )}
             </div>
@@ -184,7 +205,7 @@ export function ExplorerView({
             <div className="mb-6 rounded-2xl border border-border bg-surface/30 p-5">
               <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
               <div className="mt-5">
-                <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Discover (free)" />
+                <DiscoverBar canDiscover={canDiscover && !scanJob.running} onDiscover={() => startScan()} label={scanJob.running ? "Scan running…" : "Discover (free)"} />
               </div>
             </div>
           )}
@@ -210,8 +231,9 @@ export function ExplorerView({
               body="Nothing new since your last scan. Your pipeline is current — that's the goal."
               note={scanNote}
               onRerun={() => {
-                setFilters({ ...filters, sinceDays: Math.max(filters.sinceDays, 30) });
-                void discover();
+                const f = { ...filters, sinceDays: Math.max(filters.sinceDays, 30) };
+                setFilters(f);
+                startScan(f);
               }}
               rerunLabel="Look back 30 days"
             />
@@ -223,15 +245,16 @@ export function ExplorerView({
               body="Discovery is free — loosen and re-cast as often as you want."
               note={scanNote}
               onRerun={() => {
-                setFilters({ ...filters, sinceDays: 30, block: [], allow: [] });
-                void discover();
+                const f = { ...filters, sinceDays: 30, block: [], allow: [] };
+                setFilters(f);
+                startScan(f);
               }}
               rerunLabel="Widen to 30 days · clear location"
             />
           )}
           {phase === "degraded" && (
             <DegradedCard
-              onRetry={() => void discover()}
+              onRetry={() => startScan()}
               companiesScanned={companiesScanned}
               companiesAvailable={companiesAvailable}
               capHit={capHit}
@@ -239,7 +262,7 @@ export function ExplorerView({
               partial={partial}
             />
           )}
-          {phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => void discover()} />}
+          {phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => startScan()} />}
         </>
       )}
     </div>

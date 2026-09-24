@@ -7,6 +7,7 @@ import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
+import { SieveBadge, type SieveEntry } from "./title-sieve";
 
 function freshness(postedAt: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(postedAt)) return "";
@@ -38,7 +39,7 @@ function Logo({ company }: { company: string }) {
 // What a running worker is doing on this exact posting → the live CTA label.
 const WORKER_LABEL: Record<string, string> = { evaluate: "Evaluating…", pdf: "Preparing CV…", research: "Researching…", apply: "Filling…" };
 
-export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: DiscoveredOffer; inPipeline: boolean; evaluatedN?: string }) {
+export function DiscoveryCard({ offer, inPipeline, evaluatedN, sieve }: { offer: DiscoveredOffer; inPipeline: boolean; evaluatedN?: string; sieve?: SieveEntry }) {
   const { added, adding, addToPipeline } = useExplore();
   const { jobs, startJob } = useJobs();
 
@@ -88,6 +89,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
         <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>
         {fresh && <span className="text-faint">{fresh}</span>}
+        <SieveBadge entry={sieve} />
         {unverified && (
           <span
             className="inline-flex items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-300"

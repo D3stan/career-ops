@@ -118,3 +118,16 @@ test("the Explore limit still returns the complete count", () => {
   assert.equal(result.offers.length, MAX_OFFER_LIMIT);
   assert.equal(result.count, MAX_OFFER_LIMIT + 40);
 });
+
+test("a newer skipped row hides the URL's older added row", () => {
+  const skipAware = (c) => (c[5] && /skipped/.test(c[5]) ? null : toOffer(c));
+  const rows = [
+    header,
+    "https://example.com/1\t2026-08-09\ttest\tPraktikant Logistik\tBMW\tadded\t",
+    "https://example.com/2\t2026-08-09\ttest\tStudent Developer\tAcme\tadded\t",
+    "https://example.com/1\t2026-08-10\ttest\tPraktikant Logistik\tBMW\tskipped_sieve\t",
+  ];
+  const result = collectWhatsNew(rows, { cutoff: Date.parse("2026-08-03"), toOffer: skipAware });
+  assert.equal(result.count, 1);
+  assert.equal(result.offers[0].url, "https://example.com/2");
+});

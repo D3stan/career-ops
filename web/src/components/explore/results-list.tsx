@@ -7,33 +7,45 @@ import type { DiscoveredOffer } from "@/lib/explore";
 import { CostBadge } from "@/components/cost/cost-badge";
 import { DiscoveryCard } from "./discovery-card";
 import { useExplore } from "./explore-provider";
+import { SieveBar, sieveRank, useTitleSieve } from "./title-sieve";
 
 export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; evaluatedN?: string };
 
 export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
   const { companiesScanned, partial, addToPipeline, added, mode } = useExplore();
   const isAi = mode === "ai";
-  const [sort, setSort] = useState<"fresh" | "company">("fresh");
+  const [sort, setSort] = useState<"fresh" | "company" | "fit">("fresh");
   const [q, setQ] = useState("");
+  const sieve = useTitleSieve();
+  const hasVerdicts = offers.some((o) => sieve.entries.has(o.url));
+
+  // A sieved-out offer leaves the grid; it stays listed (and restorable) under
+  // "Sieved out" in the bar above.
+  const shown = useMemo(() => offers.filter((o) => sieve.entries.get(o.url)?.verdict !== "drop"), [offers, sieve.entries]);
 
   const view = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    let list = offers;
+    let list = shown;
     if (needle) list = list.filter((o) => o.title.toLowerCase().includes(needle) || o.company.toLowerCase().includes(needle));
+    const byFresh = (a: EnrichedOffer, b: EnrichedOffer) => (b.postedAt || "").localeCompare(a.postedAt || "");
     const sorted = [...list].sort((a, b) =>
-      sort === "fresh" ? (b.postedAt || "").localeCompare(a.postedAt || "") : a.company.localeCompare(b.company),
+      sort === "fit"
+        ? sieveRank(sieve.entries.get(a.url)?.verdict) - sieveRank(sieve.entries.get(b.url)?.verdict) || byFresh(a, b)
+        : sort === "fresh"
+          ? byFresh(a, b)
+          : a.company.localeCompare(b.company),
     );
     return sorted;
-  }, [offers, q, sort]);
+  }, [shown, q, sort, sieve.entries]);
 
-  const addable = offers.filter((o) => !o.inPipeline && !o.evaluatedN && !added.has(o.url));
+  const addable = shown.filter((o) => !o.inPipeline && !o.evaluatedN && !added.has(o.url));
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <p className="text-sm text-foreground">
-            <span className="font-semibold">{offers.length}</span> {isAi ? `candidate${offers.length === 1 ? "" : "s"}` : `fresh role${offers.length === 1 ? "" : "s"}`}
+            <span className="font-semibold">{shown.length}</span> {isAi ? `candidate${shown.length === 1 ? "" : "s"}` : `fresh role${shown.length === 1 ? "" : "s"}`}
             <CostBadge kind={isAi ? "spend" : "free-network"} size="xs" className="ml-2 align-middle" />
           </p>
           <p className="text-[12px] text-faint">
@@ -54,7 +66,7 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
             />
           </div>
           <div className="inline-flex rounded-lg border border-border bg-surface/40 p-0.5 text-xs">
-            {(["fresh", "company"] as const).map((s) => (
+            {(hasVerdicts ? (["fit", "fresh", "company"] as const) : (["fresh", "company"] as const)).map((s) => (
               <button
                 key={s}
                 type="button"
@@ -77,9 +89,11 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
         </div>
       </div>
 
+      <SieveBar sieve={sieve} offers={shown.filter((o) => !o.evaluatedN)} />
+
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {view.map((o) => (
-          <DiscoveryCard key={o.url} offer={o} inPipeline={o.inPipeline} evaluatedN={o.evaluatedN} />
+          <DiscoveryCard key={o.url} offer={o} inPipeline={o.inPipeline} evaluatedN={o.evaluatedN} sieve={sieve.entries.get(o.url)} />
         ))}
       </div>
 

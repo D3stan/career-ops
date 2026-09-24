@@ -43,10 +43,15 @@ export function collectWhatsNew(rows, { cutoff, toOffer, offerLimit = DEFAULT_OF
   let count = 0;
   let anyDated = false;
 
+  // The URL is claimed by its NEWEST row even when that row is rejected: a URL
+  // whose latest row is `skipped_sieve` / `skipped_expired` must not resurface
+  // through the older `added` row still further up the file.
   const add = (columns, limit) => {
+    const key = (columns[0] || "").trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
     const offer = toOffer(columns);
-    if (!offer || seen.has(offer.url)) return;
-    seen.add(offer.url);
+    if (!offer) return;
     count += 1;
     if (offers.length < limit) offers.push(offer);
   };

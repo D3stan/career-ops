@@ -79,6 +79,27 @@ const CALL_SITES = [
     probe: 'flags-only',
   },
   {
+    source: 'web/src/lib/core/scan-job.ts',
+    script: 'scan-ats-full.mjs',
+    // A REAL (saving) background scan — probe the flags with --help only.
+    args: ['--since', '7', '--ats', 'greenhouse', '--limit', '150', '--json'],
+    probe: 'flags-only',
+  },
+  {
+    source: 'web/src/app/api/whats-new/sieve/route.ts',
+    script: 'title-sieve.mjs',
+    // Empty stdin → nothing to record; the probe only proves the flag is accepted.
+    args: ['--apply'],
+    probe: 'run',
+  },
+  {
+    source: 'web/src/app/api/whats-new/sieve/restore/route.ts',
+    script: 'title-sieve.mjs',
+    // A real restore exits 1 for a URL that was never sieved out.
+    args: ['--restore', 'https://example.test/job/1'],
+    probe: 'flags-only',
+  },
+  {
     source: 'web/src/lib/core/pipeline.ts',
     script: null,
     args: [],
