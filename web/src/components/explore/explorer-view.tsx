@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings } from "lucide-react";
+import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
@@ -190,14 +190,28 @@ export function ExplorerView({
           <ScanJobBanner scan={scanJob} />
           {isResults ? (
             <div className="mb-6 rounded-xl border border-border bg-surface/30">
-              <button type="button" onClick={() => setRefineOpen((v) => !v)} className="flex w-full items-center gap-2 px-4 py-3 text-sm font-medium text-foreground">
-                <Compass className="size-4 text-brand" /> Refine search
-                <ChevronDown className={cn("ml-auto size-4 text-muted transition-transform", refineOpen && "rotate-180")} />
-              </button>
+              <div className="flex w-full items-center gap-2 px-4 py-3">
+                <button type="button" onClick={() => setRefineOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-sm font-medium text-foreground">
+                  <Compass className="size-4 text-brand" /> Refine search
+                  <ChevronDown className={cn("size-4 text-muted transition-transform", refineOpen && "rotate-180")} />
+                </button>
+                {/* Always visible — this is the actual "start a new search" action.
+                    Buried inside the collapsed accordion above, it read as "the
+                    scan button does nothing" (the header's Scan/AI-search toggle
+                    only switches mode; it isn't a run button). */}
+                <button
+                  type="button"
+                  disabled={!canDiscover || scanJob.running}
+                  onClick={() => startScan()}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-xs font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50 max-sm:min-h-[36px]"
+                >
+                  {scanJob.running ? <Loader2 className="size-3.5 animate-spin" /> : <Compass className="size-3.5" />}
+                  {scanJob.running ? "Scan running…" : "Scan again"}
+                </button>
+              </div>
               {refineOpen && (
                 <div className="space-y-4 border-t border-border p-4">
                   <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
-                  <DiscoverBar canDiscover={canDiscover && !scanJob.running} onDiscover={() => startScan()} label={scanJob.running ? "Scan running…" : "Scan again (free)"} />
                 </div>
               )}
             </div>

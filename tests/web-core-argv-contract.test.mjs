@@ -58,7 +58,10 @@ const CALL_SITES = [
     probe: 'run',
   },
   {
-    source: 'web/src/app/api/portals/verify/route.ts',
+    // Background job now (verify-portals.mjs prints nothing until its whole
+    // sequential sweep is done, so an in-request call could only time out with
+    // zero results as portals.yml grows — see lib/core/verify-job.ts).
+    source: 'web/src/lib/core/verify-job.ts',
     script: 'verify-portals.mjs',
     args: [],
     probe: 'run',
