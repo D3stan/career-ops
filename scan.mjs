@@ -2806,13 +2806,14 @@ const KNOWN_FLAGS = [
   '--dry-run', '--verify', '--headed-fallback', '--throttle', '--rediscover-404',
   '--include-blacklisted', '--company', '--posted-after', '--posted-before',
   '--since', '--quiet', '--json', '--help', '-h',
+  '--push', '--remote', '--token',
 ];
 
 // Flags whose space-separated value is the NEXT argv token (the `--flag=value`
 // form is self-contained and never needs this). --throttle is deliberately
 // excluded: only its bare and `--throttle=<ms>` forms are read below, so a
 // following token is never its value.
-const VALUE_FLAGS = ['--company', '--posted-after', '--posted-before', '--since'];
+const VALUE_FLAGS = ['--company', '--posted-after', '--posted-before', '--since', '--remote', '--token'];
 
 const USAGE = `Usage:
   node scan.mjs                              # scan all enabled companies
@@ -2827,6 +2828,8 @@ const USAGE = `Usage:
   node scan.mjs --since 7                    # postings from the last 7 days
   node scan.mjs --posted-after 2026-07-01    # absolute lower bound on posting date
   node scan.mjs --posted-before 2026-08-01   # absolute upper bound on posting date
+  node scan.mjs --push                       # push discovered offers to remote VPS ingest API
+  node scan.mjs --push --remote <url> --token <secret>
   node scan.mjs --json                       # emit one machine-readable receipt on stdout
   node scan.mjs --quiet                      # suppress the manifesto footer
   node scan.mjs --help                       # print this usage block and exit`;
@@ -2872,6 +2875,19 @@ async function main() {
     return value;
   };
   const filterCompany = requireValue('--company')?.toLowerCase() ?? null;
+  const push = args.includes('--push');
+  const remoteUrl = requireValue('--remote') || process.env.CAREER_OPS_REMOTE_URL || '';
+  const webhookSecret = requireValue('--token') || process.env.CAREER_OPS_WEBHOOK_SECRET || '';
+  if (push) {
+    if (!remoteUrl) {
+      console.error('Error: --push requires CAREER_OPS_REMOTE_URL in env or --remote <url>');
+      process.exit(1);
+    }
+    if (!webhookSecret) {
+      console.error('Error: --push requires CAREER_OPS_WEBHOOK_SECRET in env or --token <secret>');
+      process.exit(1);
+    }
+  }
   // --posted-after / --posted-before <YYYY-MM-DD>: absolute-date bounds on the
   // employer's real posting date (job.postedAt), gated against a typo since a
   // silently-ignored bound would look like "no jobs matched" instead of an error.
@@ -3331,7 +3347,36 @@ async function main() {
 
   // 6. Write results
   if (!dryRun && verifiedOffers.length > 0) {
-    await appendToPipeline(verifiedOffers);
+    if (push) {
+      const endpoint = `${remoteUrl.replace(/\/+$/, '')}/api/pipeline/ingest`;
+      const pushPayload = {
+        source: 'mac-scanner',
+        jobs: verifiedOffers.map(o => ({
+          url: o.url,
+          company: o.company,
+          role: o.title || o.role,
+          location: o.location || undefined,
+          compensation: o.salary ? formatCompensation(o.salary) : undefined,
+        })),
+      };
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${webhookSecret}`,
+        },
+        body: JSON.stringify(pushPayload),
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Remote push failed (${res.status}): ${errText}`);
+      }
+      const pushResult = await res.json();
+      console.log(`\nRemote push: ${pushResult.received} sent, ${pushResult.added} added, ${pushResult.skippedDuplicates} duplicates skipped.`);
+    } else {
+      await appendToPipeline(verifiedOffers);
+    }
     await appendToScanHistory(verifiedOffers, date);
   }
   if (!dryRun && cooldownOffers.length > 0) {
@@ -3559,6 +3604,8 @@ async function main() {
     }
     if (dryRun) {
       console.log('\n(dry run — run without --dry-run to save results)');
+    } else if (push) {
+      console.log(`\nResults pushed to remote and logged to ${SCAN_HISTORY_PATH}`);
     } else {
       console.log(`\nResults saved to ${PIPELINE_PATH} and ${SCAN_HISTORY_PATH}`);
     }

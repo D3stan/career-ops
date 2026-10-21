@@ -90,3 +90,14 @@ for (const shape of Object.keys(shapes)) {
     }
   }
 }
+
+// Headed additions with unassigned sentinel (—, -) assign the next free tracker row number
+for (const sentinel of ['—', '-']) {
+  const { row, out } = mergeOne('headed', sentinel);
+  if (row && /^\|\s*1\s*\|/.test(row) && !/warning|already used/i.test(out)) {
+    pass(`headed: unassigned num "${sentinel}" assigns next free row (1) without warning`);
+  } else {
+    fail(`headed: unassigned num "${sentinel}" failed to assign next free row (1). row: ${row ?? '(none)'} | ${out}`);
+  }
+}
+

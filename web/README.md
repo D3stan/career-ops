@@ -106,3 +106,16 @@ Three constraints follow from all this:
 `tests/web-test-layout.test.mjs` in the **root** suite enforces all of the above
 on every PR, including that `npm test` never goes back to listing suites by name
 ([#2360](https://github.com/career-ops-hq/career-ops/issues/2360)).
+
+## Remote pipeline ingest (Mac scanner -> VPS)
+
+`POST /api/pipeline/ingest` lets a residential-IP machine push scan results to a
+hosted dashboard. On the VPS set:
+
+- `CAREER_OPS_WEBHOOK_SECRET` — bearer secret (requests get 401 without it).
+- `CAREER_OPS_WEB_ALLOWED_HOSTS` — your public hostname, otherwise the loopback
+  host guard in `src/proxy.ts` rejects the request with 403.
+
+On the Mac: `node scan.mjs --push` or `node scripts/push-pipeline.mjs --file data/pipeline.md [--dry-run]`,
+with `CAREER_OPS_REMOTE_URL` and `CAREER_OPS_WEBHOOK_SECRET` exported (prefer env vars to `--token`,
+which is visible in `ps`). Max 5000 jobs per request.

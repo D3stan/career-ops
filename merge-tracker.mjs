@@ -878,8 +878,16 @@ function parseHeadedAddition(lines, filename) {
     return null;
   }
 
+  const rawNum = at('num');
+  const isUnassignedNum = /^[—–-]$/.test(rawNum);
+  const parsedNum = isUnassignedNum ? null : parseTrackerNum(rawNum);
+  if (!isUnassignedNum && parsedNum === null) {
+    console.warn(`⚠️  Skipping ${filename}: invalid entry number`);
+    return null;
+  }
+
   return {
-    num: parseTrackerNum(at('num')),
+    num: parsedNum,
     date: at('date'),
     company: at('company'),
     role: at('role'),
@@ -928,7 +936,8 @@ function parseTsvContent(content, filename) {
     if (!headed) return null;
     // Number.isSafeInteger rather than isNaN: parseTrackerNum returns null for a
     // cell that is not a whole positive integer, and isNaN(null) is false.
-    if (!Number.isSafeInteger(headed.num) || headed.num <= 0) {
+    // Unassigned sentinels (—, -) leave headed.num as null to assign the next free row ID.
+    if (headed.num !== null && (!Number.isSafeInteger(headed.num) || headed.num <= 0)) {
       console.warn(`⚠️  Skipping ${filename}: invalid entry number`);
       return null;
     }
@@ -1700,15 +1709,17 @@ for (const file of tsvFiles) {
     // a real collision, using the next free ID above the current maximum and
     // warning loudly so report/tracker drift is visible (#1704).
     let entryNum;
-    if (!usedNumbers.has(addition.num)) {
+    if (addition.num != null && !usedNumbers.has(addition.num)) {
       entryNum = addition.num;
     } else {
       entryNum = maxNum + 1;
       while (usedNumbers.has(entryNum)) entryNum++;
-      console.warn(
-        `⚠️  Tracker #${addition.num} already used; assigning #${entryNum} to ` +
-        `${addition.company} — ${addition.role}. Report link remains ${addition.report}.`,
-      );
+      if (addition.num != null) {
+        console.warn(
+          `⚠️  Tracker #${addition.num} already used; assigning #${entryNum} to ` +
+          `${addition.company} — ${addition.role}. Report link remains ${addition.report}.`,
+        );
+      }
     }
     usedNumbers.add(entryNum);
     if (entryNum > maxNum) maxNum = entryNum;
