@@ -17,8 +17,10 @@
  *                                        # dismiss-marker state (untracked/tracked)
  *   node upgrade-tests.mjs --canary      # planted user-file clobber must go RED
  *   node upgrade-tests.mjs --local-paths # a declared fork-local path survives (#2421)
+ *   node upgrade-tests.mjs --user-layer-refusal # a user-layer manifest entry is refused,
+ *                                        # the update completes, rollback leaves it alone
  */
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
@@ -33,6 +35,10 @@ const CANONICAL = 'https://github.com/career-ops-hq/career-ops.git';
 // fetches the old address; both must resolve to the local mirror or an
 // upgrade-from-old-tag scenario silently reaches the real network.
 const CANONICAL_LEGACY = 'https://github.com/santifer/career-ops.git';
+const GITHUB_API_HOST = 'api.github.com';
+// What apply() prints when its cross-check against the GitHub ref API gets no
+// answer, so a leg can tell that the API stayed out of reach (see runLeg).
+const REF_API_UNREACHED = 'could not reach the GitHub ref API';
 const TAG_RE = /^career-ops-v(\d+)\.(\d+)\.(\d+)$/;
 
 function git(cwd, ...args) {
@@ -67,6 +73,11 @@ function writeGitConfig(work, mirror) {
   const cfg = join(work, 'gitconfig');
   const url = pathToFileURL(mirror).href;
   writeFileSync(cfg, `[user]\n\tname = upgrade-tests\n\temail = upgrade-tests@career-ops.test\n[url "${url}"]\n\tinsteadOf = ${CANONICAL}\n\tinsteadOf = ${CANONICAL_LEGACY}\n[safe]\n\tdirectory = *\n`);
+  // Read by curl through CURL_HOME (see hermeticEnv): sends api.github.com to a
+  // closed local port, so the ref API cannot answer. Only that host, and only
+  // curl: apply() also runs npm, which the leg needs and which curl config
+  // never reaches.
+  writeFileSync(join(work, '.curlrc'), `connect-to = "${GITHUB_API_HOST}:443:127.0.0.1:9"\n`);
   return cfg;
 }
 
@@ -85,6 +96,36 @@ function hermeticEnv(cfg) {
     GIT_CONFIG_GLOBAL: cfg,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_COUNT: '0',
+    // Hermeticity is not only a git concern. #3845 made apply() resolve its
+    // target through resolveTargetRef(), whose default 'release' channel
+    // curls RELEASES_API. The redirects above rewrite git URLs onto the local
+    // mirror and do nothing to a raw curl, so that call reaches the real
+    // api.github.com and apply upgrades to whatever the live newest release
+    // happens to be.
+    //
+    // Between releases that tag IS newestAncestorTag(), so the leg becomes a
+    // no-op ("Update complete: vX → vX"), nothing is written, and the
+    // non-vacuity oracle fails while naming whichever SYSTEM_PATHS file the PR
+    // touched. The gate then reports a defect in unrelated changes, which is
+    // the reading that costs the most time.
+    //
+    // The 'main' channel is what #2007 designed this harness around ("apply is
+    // pure git (curl lives only in check()), so the whole flow runs
+    // hermetically") and it is the only channel the mirror can actually serve.
+    // Production behaviour is untouched: this pins the harness, not
+    // resolveTargetRef().
+    CAREER_OPS_UPDATE_CHANNEL: 'main',
+    // The 'main' channel still curls. #3805 made apply() read main's SHA from
+    // the GitHub ref API and refuse a target that does not descend from it.
+    // The mirror's main is the commit under test, so once real main moves on
+    // during a run (any merge elsewhere) the old install's apply() refuses the
+    // PR with "does not descend from upstream main" and the gate goes RED on a
+    // change that has nothing to do with it. That check is the old install's
+    // own code, so no change to update-system.mjs can stop it here; only the
+    // environment can. With the API unreachable, apply() prints its "could not
+    // be cross-checked" note and goes on, which is the answer that is true of
+    // a mirror: there is no upstream to compare the target with.
+    CURL_HOME: dirname(cfg),
   };
 }
 
@@ -190,19 +231,29 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null,
       .filter((p) => { try { git(mirror, 'cat-file', '-e', `${oldTag}:${p}`); return false; } catch { return true; } })
       .filter((p) => { try { git(mirror, 'cat-file', '-e', `${targetSha}:${p}`); return true; } catch { return false; } });
 
-    let exitCode = 0, output = '';
-    try {
-      // The fixture is an explicit installation acceptance test, so pass the
-      // same confirmation a user would provide after reviewing the preview.
-      output = execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
-        cwd: install, encoding: 'utf-8', timeout: 300000,
-        env: { ...hermeticEnv(cfg), CAREER_OPS_UPDATE_CONFIRM: '1' },
-      });
-    } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
+    // The updater that runs first and makes the cross-check is the old install's.
+    const oldUpdater = git(mirror, 'show', `${oldTag}:update-system.mjs`);
+    // The fixture is an explicit installation acceptance test, so pass the
+    // same confirmation a user would provide after reviewing the preview.
+    // spawnSync rather than execFileSync: the cross-check note below goes to
+    // stderr, which execFileSync drops when the run succeeds.
+    const run = spawnSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
+      cwd: install, encoding: 'utf-8', timeout: 300000,
+      env: { ...hermeticEnv(cfg), CAREER_OPS_UPDATE_CONFIRM: '1' },
+    });
+    const exitCode = run.status ?? 1;
+    const output = `${run.stdout ?? ''}${run.stderr ?? ''}${run.error ? `\n${run.error.message}` : ''}`;
 
     // Ordered assertions — user-layer manifest BEFORE any repo script runs
     // (doctor's autoCopy writes user-layer files).
     ok(exitCode === 0, `apply exits 0 (got ${exitCode})`);
+    // Proof that the ref API was out of reach, from an install whose apply()
+    // asks it at all (#3805 onwards). If curl ever stops reading CURL_HOME, or
+    // the API moves to another host, this fails on every run, instead of the
+    // gate going RED only on the runs where main happened to move.
+    if (oldUpdater.includes(REF_API_UNREACHED)) {
+      ok(output.includes(REF_API_UNREACHED), `the GitHub ref API stayed out of reach (apply printed "${REF_API_UNREACHED}")`);
+    }
     let installOracle = null;
     try { installOracle = git(install, 'rev-parse', `HEAD:${oracle}`); } catch { /* leave null */ }
     ok(installOracle === oracleBlob, `upgrade executed: ${oracle} blob matches target (non-vacuity oracle)`);
@@ -323,19 +374,27 @@ function canary() {
   const targetSha = git(ROOT, 'rev-parse', 'HEAD');
   const newestOld = newestAncestorTag(targetSha);
   if (!newestOld) { console.error('No release tag is an ancestor of HEAD'); process.exit(1); }
-  const { failures } = runLeg({
+  const { failures, output } = runLeg({
     oldTag: newestOld, targetSha, label: 'canary',
     mutateMirror: (mirror, work) => {
-      // Poison commit: track cv.md and add it to SYSTEM_PATHS so the old
-      // updater checks it out over the user's CV.
+      // Poison only the throwaway target updater: after its own safety checks
+      // and coherent-install verification have passed, write a sentinel over
+      // the user's CV. This keeps the canary independent of manifest policy —
+      // including when the old release already validates target manifests —
+      // and asks whether the harness's byte-integrity oracle catches a clobber.
       const wt = join(work, 'poison-wt');
       git(mirror, 'worktree', 'add', wt, 'main');
-      writeFileSync(join(wt, 'cv.md'), '# CLOBBERED BY UPDATE\n');
+      const completion = "    console.log(`\\nUpdate complete: v${local} → v${remote}`);";
       const updater = readFileSync(join(wt, 'update-system.mjs'), 'utf-8')
-        .replace(/const\s+SYSTEM_PATHS\s*=\s*\[/, "const SYSTEM_PATHS = [\n  'cv.md',");
+        .replace(
+          completion,
+          `    writeFileSync(join(ROOT, 'cv.md'), '# CLOBBERED BY UPDATE\\n');\n${completion}`,
+        );
+      if (updater === readFileSync(join(wt, 'update-system.mjs'), 'utf-8')) {
+        throw new Error('Could not inject the canary user-file clobber');
+      }
       writeFileSync(join(wt, 'update-system.mjs'), updater);
-      // -f: cv.md is gitignored (user layer) — the poison must force-track it.
-      git(wt, 'add', '-f', 'cv.md', 'update-system.mjs');
+      git(wt, 'add', 'update-system.mjs');
       git(wt, '-c', 'user.name=canary', '-c', 'user.email=canary@test', 'commit', '-qm', 'canary: poison');
       const sha = git(wt, 'rev-parse', 'HEAD');
       git(mirror, 'worktree', 'remove', '--force', wt);
@@ -344,8 +403,14 @@ function canary() {
     },
   });
   const clobbered = failures.some((f) => f.startsWith('user file byte-identical: cv.md'));
-  if (clobbered) { console.log('CANARY GREEN: harness detected the planted user-file clobber'); process.exit(0); }
-  console.error('CANARY RED: planted clobber was NOT detected — the harness cannot fail; do not trust its green');
+  const refused = /Refused \d+ manifest entry\(ies\) naming the user layer:[\s\S]*\bcv\.md\b/.test(output || '');
+  if (clobbered || refused) {
+    console.log(clobbered
+      ? 'CANARY GREEN: harness detected the planted user-file clobber'
+      : 'CANARY GREEN: updater refused the planted user-layer manifest entry');
+    process.exit(0);
+  }
+  console.error('CANARY RED: planted clobber was neither refused nor detected — do not trust this gate');
   process.exit(1);
 }
 
@@ -447,10 +512,103 @@ function localPathsLeg() {
   process.exit(failures.length ? 1 : 0);
 }
 
+/** User-layer refusal leg (#3782): a target manifest entry naming the user
+ *  layer is refused entry by entry, never by aborting the update.
+ *
+ *  Poisons the mirror so the target ships `cv.md` AND lists it in SYSTEM_PATHS.
+ *
+ *  Expected: apply refuses that one entry out loud, completes the rest of the
+ *  update, and leaves the user's CV byte-identical. A rollback of that update
+ *  then leaves the same path alone too.
+ *
+ *  Non-vacuity: with a user-layer abort in front of the self-bootstrap
+ *  checkout, apply exits non-zero here and nothing is updated.
+ */
+function userLayerRefusalLeg() {
+  const USER_FILE = 'cv.md';
+  const baseSha = git(ROOT, 'rev-parse', 'HEAD');
+  const oldTag = newestAncestorTag(baseSha);
+  if (!oldTag) { console.error('No release tag is an ancestor of HEAD — fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
+
+  const work = realpathSync(mkdtempSync(join(tmpdir(), 'upgrade-userlayer-')));
+  const failures = [];
+  const ok = (cond, msg) => { console.log(`  ${cond ? 'PASS' : 'FAIL'} [user-layer-refusal] ${msg}`); if (!cond) failures.push(msg); };
+  const run = (cwd, cfg, ...args) => {
+    try {
+      return { exitCode: 0, output: execFileSync(process.execPath, ['update-system.mjs', ...args], {
+        cwd, encoding: 'utf-8', timeout: 300000, env: hermeticEnv(cfg), stdio: ['ignore', 'pipe', 'pipe'],
+      }) };
+    } catch (e) { return { exitCode: e.status ?? 1, output: `${e.stdout ?? ''}${e.stderr ?? ''}` }; }
+  };
+
+  try {
+    const mirror = buildMirror(work, baseSha);
+
+    // Poison: upstream's manifest claims the user's CV and ships one.
+    const wt = join(work, 'poison-wt');
+    git(mirror, 'worktree', 'add', wt, 'main');
+    writeFileSync(join(wt, USER_FILE), '# UPSTREAM VERSION — must never land on top of the user\n');
+    const updater = readFileSync(join(wt, 'update-system.mjs'), 'utf-8')
+      .replace(/const\s+SYSTEM_PATHS\s*=\s*\[/, `const SYSTEM_PATHS = [\n  '${USER_FILE}',`);
+    if (!updater.includes(`'${USER_FILE}',`)) throw new Error('Could not inject the poisoned SYSTEM_PATHS entry (constant renamed?)');
+    writeFileSync(join(wt, 'update-system.mjs'), updater);
+    git(wt, 'add', '-f', USER_FILE, 'update-system.mjs');
+    git(wt, '-c', 'user.name=upgrade-tests', '-c', 'user.email=upgrade-tests@career-ops.test', 'commit', '-qm', 'poison: manifest names the user layer');
+    const targetSha = git(wt, 'rev-parse', 'HEAD');
+    git(mirror, 'worktree', 'remove', '--force', wt);
+    git(mirror, 'update-ref', 'refs/heads/main', targetSha);
+
+    const cfg = writeGitConfig(work, mirror);
+    const install = join(work, 'install');
+    git(ROOT, 'clone', '--quiet', '--branch', oldTag, ROOT, install);
+    git(install, 'remote', 'set-url', 'origin', CANONICAL);
+    seedFixture(install, { state: fixtureStateFor(oldTag) });
+    const userContent = '# my CV — no upstream counterpart\n';
+    writeFileSync(join(install, USER_FILE), userContent);
+    const before = sha256(join(install, USER_FILE));
+    const intact = () => existsSync(join(install, USER_FILE)) && sha256(join(install, USER_FILE)) === before;
+
+    const applied = run(install, cfg, 'apply', '--confirm');
+    ok(applied.exitCode === 0, `apply completes despite the user-layer manifest entry (exit ${applied.exitCode})`);
+    ok(
+      new RegExp(`Refused \\d+ manifest entry\\(ies\\) naming the user layer:[\\s\\S]*\\b${USER_FILE.replace('.', '\\.')}\\b`).test(applied.output),
+      `apply refuses the entry out loud (${USER_FILE})`,
+    );
+    ok(applied.output.includes('Update complete'), 'apply reports the update as complete');
+    ok(
+      git(install, 'rev-parse', 'HEAD:update-system.mjs') === git(mirror, 'rev-parse', `${targetSha}:update-system.mjs`),
+      'the rest of the update landed (updater matches the target)',
+    );
+    ok(intact(), `user file is byte-identical after apply: ${USER_FILE}`);
+
+    const rolledBack = run(install, cfg, 'rollback');
+    ok(rolledBack.exitCode === 0, `rollback of that update succeeds (exit ${rolledBack.exitCode})`);
+    ok(rolledBack.output.includes('Rollback complete'), 'rollback reports completion');
+    ok(intact(), `user file is byte-identical after rollback: ${USER_FILE}`);
+    ok(
+      git(install, 'status', '--porcelain', '--', USER_FILE).startsWith('??') || git(install, 'status', '--porcelain', '--', USER_FILE) === '',
+      `rollback neither staged nor committed ${USER_FILE}`,
+    );
+
+    if (failures.length) {
+      for (const [name, result] of [['apply', applied], ['rollback', rolledBack]]) {
+        console.log(`  --- ${name} output tail [user-layer-refusal] ---`);
+        console.log(result.output.split('\n').slice(-20).join('\n'));
+      }
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+
+  console.log(failures.length ? `RED: ${failures.length} failure(s)` : 'GREEN');
+  process.exit(failures.length ? 1 : 0);
+}
+
 if (isMainModule(import.meta.url)) {
   const mode = process.argv[2];
   if (mode === '--pr-gate') prGate();
   else if (mode === '--canary') canary();
   else if (mode === '--local-paths') localPathsLeg();
-  else { console.error('Usage: node upgrade-tests.mjs --pr-gate | --canary | --local-paths'); process.exit(1); }
+  else if (mode === '--user-layer-refusal') userLayerRefusalLeg();
+  else { console.error('Usage: node upgrade-tests.mjs --pr-gate | --canary | --local-paths | --user-layer-refusal'); process.exit(1); }
 }

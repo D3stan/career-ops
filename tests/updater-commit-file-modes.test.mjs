@@ -35,6 +35,7 @@ function makeRepo() {
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
   g('config', 'core.fileMode', 'false');
+  g('config', 'core.hooksPath', join(dir, 'no-such-hooks'));
   // stagedPathsOutside needs the RAW runner: gitIn trims, which would strip a
   // leading space off a path and defeat the very case test 7 pins.
   const raw = (...args) => gitRawIn(dir, ...args);

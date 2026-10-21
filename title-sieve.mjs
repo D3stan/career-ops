@@ -418,7 +418,7 @@ export function candidatesFromScanHistory(text, { sinceIso }) {
 }
 
 async function main(args) {
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   if (hasFlag(args, '--apply')) {
     let input = '';
     for await (const chunk of process.stdin) input += chunk;

@@ -12,7 +12,7 @@
 // cheap title/location filters, so a 10k-tenant sweep pays detail-page
 // requests for real candidates only, never for noise.
 
-import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 
 // ~20 postings/page → 30 pages covers 600 postings; tenants bigger than that
@@ -27,11 +27,6 @@ const HEADERS = {
   'user-agent': BROWSER_LIKE_USER_AGENT,
   'accept-language': 'en-US,en;q=0.9',
 };
-
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function resolveOrigin(entry) {
   // entry.api takes precedence over careers_url (mirrors greenhouse/ashby).
@@ -120,7 +115,10 @@ async function fetchPortal(origin, entry, ctx) {
     } catch (err) {
       // Only a first-page failure says anything about whether this host
       // has a board at all; fetch() uses the mark to decide on a fallback.
-      if (pageNum === 0 && err && typeof err === 'object') err.firstPage = true;
+      // Later pages are marked too, explicitly false: an error with no mark
+      // is what every other provider throws, and dead-board tracking has to
+      // tell "this board had already answered" apart from that.
+      if (err && typeof err === 'object') err.firstPage = pageNum === 0;
       throw err;
     }
     const pageJobs = parseIcimsSearchPage(html, origin, entry.name);
@@ -150,8 +148,11 @@ export default {
    * because the public dataset stores some tenants bare and some as a full
    * portal subdomain). A fallback is tried only when the previous host answers
    * 404 on its FIRST page, the one response that means "no board here". Any
-   * other failure (throttle, timeout, DNS, a later-page 404) is rethrown as-is,
-   * so dead-board tracking still reads it as "unknown", never "dead".
+   * other failure (throttle, timeout, DNS, a later-page 404) is rethrown as-is.
+   * A first-page throttle or timeout carries its own status, which dead-board
+   * tracking reads as "unknown". A later-page failure carries `firstPage:
+   * false`, which is how tracking knows the board had already answered and
+   * does not count a later-page 404 as a miss (recordBoardFailure()).
    */
   async fetch(entry, ctx) {
     const primary = resolveOrigin(entry);

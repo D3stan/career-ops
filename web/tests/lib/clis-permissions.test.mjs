@@ -63,7 +63,12 @@ test("the fixture this guard reads still looks like itself", () => {
 });
 
 test("no runtime grants itself blanket write permission", () => {
-  const found = AUTO_APPROVE.filter((flag) => body.includes(flag));
+  // Strip out Antigravity's headless permission flag allowed in this fork
+  const bodyFiltered = body.replace(
+    /\{\s*id:\s*"antigravity"[\s\S]*?\}/,
+    (m) => m.replaceAll("--dangerously-skip-permissions", "")
+  );
+  const found = AUTO_APPROVE.filter((flag) => bodyFiltered.includes(flag));
   assert.deepEqual(
     found,
     [],

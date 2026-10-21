@@ -39,7 +39,7 @@ test("persisting is guarded by readSavedCliId so an explicit choice is never ove
 test("the detect effect picks with pickDefaultInstalled, not the sole-install helper", () => {
   const detect = src.slice(src.indexOf('fetch("/api/clis")'), src.indexOf("function save()"));
   assert.notEqual(detect.length, 0, "could not locate the CLI-detection effect");
-  assert.match(detect, /pickDefaultInstalled\(\s*list\s*\)/);
+  assert.match(detect, /pickDefaultInstalled\(\s*list\b/);
   assert.doesNotMatch(
     detect,
     /pickSoleInstalled\s*\(/,
@@ -53,4 +53,18 @@ test("the persist call lives in the detect effect, ahead of save()", () => {
   assert.notEqual(persist, -1);
   assert.notEqual(save, -1);
   assert.ok(persist < save, "persistCliId(auto) must run in the detect effect, not only on an explicit Save");
+});
+
+// #4012: the restore effect puts the saved id into state before /api/clis
+// answers, so a bare `if (prev) return prev` kept a stale id selected and
+// save() wrote it straight back — "open Config and click Save config" was a
+// no-op on any machine with two or more CLIs installed.
+test("the detect effect only keeps the restored id while its CLI is installed", () => {
+  const detect = src.slice(src.indexOf('fetch("/api/clis")'), src.indexOf("function save()"));
+  assert.match(detect, /if\s*\(\s*keepIfInstalled\(\s*prev\s*,\s*list\s*\)\s*\)\s*return\s+prev/);
+  assert.doesNotMatch(
+    detect,
+    /if\s*\(\s*prev\s*\)\s*return\s+prev/,
+    "an unchecked prev keeps a stale id selected and save() writes it back",
+  );
 });

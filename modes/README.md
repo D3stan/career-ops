@@ -29,6 +29,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `contacto.md` | `contacto` | LinkedIn outreach messages |
 | `deep.md` | `deep` | Deep company-research prompt |
 | `interview.md` | `interview` | Interactive profile & CV onboarding |
+| `master-profile.md` | `master-profile` | Source-backed Master Career Profile import and review |
 | `interview-prep.md` | `interview-prep` | Company-specific interview intelligence |
 | `interview-redflag.md` | `interview-redflag` | Company red-flag detector |
 | `offer-prep.md` | `offer-prep` | Contract reading companion (offer stage) |
@@ -65,7 +66,7 @@ and never touched by `update-system.mjs` (see
 | `heuristics/` | Shared candidate-facing writing heuristics loaded by other modes — `recruiter-side.md` governs PDF summaries, bullets, cover letters, form answers, and outreach |
 | `pdf/` | Opt-in passes inside the `pdf` flow, not routable modes — `hm-audit.md` is the hiring-manager read of a tailored CV, run between the fact gate and PDF render when `--hm-audit` is passed |
 | `regional/` | Market calibration modes — `eu-swe.md` calibrates applications for European SWE roles (advisory only) |
-| `ar/ da/ de/ es/ fr/ hi/ id/ it/ ja/ ko/ pl/ pt/ ru/ tr/ ua/ zh/` | Language modes: native translations of the core modes with market-specific vocabulary; each has its own README |
+| `ar/ da/ de/ es/ fr/ hi/ id/ it/ ja/ ko/ pl/ pt/ ru/ tr/ ua/ vi/ zh/` | Language modes: native translations of the core modes with market-specific vocabulary; each has its own README |
 
 ## Conventions
 

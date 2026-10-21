@@ -6,6 +6,7 @@ import { Loader2, Radar, Wrench } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { useJobs, type Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
+import type { WatchedCompany } from "@/lib/portals-config.mjs";
 
 type Company = { name: string; status: string; detail: string };
 type JobStatus = "idle" | "running" | "done" | "failed" | "cancelled";
@@ -27,7 +28,7 @@ function elapsed(from?: string): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-export function PortalsView() {
+export function PortalsView({ watched }: { watched: WatchedCompany[] }) {
   // A run is a detached background job (verify-portals.mjs probes every
   // company's ATS sequentially and prints nothing until it's ALL done — see
   // lib/core/verify-job.ts — so an in-request call can only ever time out with
@@ -128,6 +129,8 @@ export function PortalsView() {
       )}
       {job?.status === "cancelled" && !hasResults && <p className="mt-4 text-sm text-muted">Check cancelled.</p>}
 
+      {!hasResults && watched.length > 0 && <WatchedList watched={watched} />}
+
       {poll && !poll.available && (
         <p className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
           <code className="text-foreground">verify-portals.mjs</code> not found — this needs a complete career-ops
@@ -203,5 +206,32 @@ function FixAffordance({ company, job, onFix }: { company: string; job?: Job; on
     >
       <Wrench className="size-3" /> Fix
     </button>
+  );
+}
+
+function WatchedList({ watched }: { watched: WatchedCompany[] }) {
+  const scanned = watched.filter((c) => c.enabled).length;
+  return (
+    <div className="mt-5">
+      <p className="text-sm text-muted">
+        <span className="tabular-nums text-foreground">{scanned}</span> scanned ·{" "}
+        <span className="tabular-nums">{watched.length - scanned}</span> paused · run a health check to see which boards
+        still answer
+      </p>
+      <ul className="mt-4 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
+        {watched.map((c, i) => (
+          <li key={`${i}-${c.name}`} className={cn("flex items-center gap-3 px-4 py-2.5", !c.enabled && "opacity-60")}>
+            <CompanyLogo name={c.name} size={20} />
+            <span className="shrink-0 text-sm font-medium">{c.name}</span>
+            <span className="truncate font-mono text-xs text-faint">{c.host}</span>
+            {!c.enabled && (
+              <span className="ml-auto shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] font-semibold text-muted">
+                paused
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

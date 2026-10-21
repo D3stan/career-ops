@@ -9,6 +9,7 @@ import { instrumentSerif } from "@/lib/fonts";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
+import { CHINA_PRESET } from "@/lib/employer-preset.mjs";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
@@ -17,6 +18,7 @@ import { AiSearchBox } from "./ai-search-box";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
 import { ScanJobBanner, useScanJob } from "./scan-job";
+import { ScheduleJobAction } from "./schedule-job-action";
 
 // Same shape as core normalizeTextKey(s, " ") — never [^a-z0-9] (#2666).
 const norm = (s: string) => normalizeTextKey(s, " ");
@@ -41,7 +43,7 @@ export function ExplorerView({
   appsSnapshot: Application[];
   rootExists: boolean;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, loadFresh, status, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
+  const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, employerOutcome, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
   const scanNote =
     companiesScanned > 0
       ? `Scanned ${companiesScanned.toLocaleString()}${companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} compan${companiesScanned === 1 ? "y" : "ies"}${partial ? " · some sources were unreachable" : ""}.`
@@ -99,9 +101,10 @@ export function ExplorerView({
       initFilters(f);
       setMode("scan");
       // Explore opens on what past scans already found (free, instant) rather than
-      // on an empty form. Onboarding's ?run=1 additionally kicks off a scan.
+      // on an empty form. Onboarding's ?run=1 additionally kicks off a scan —
+      // never for the employer preset, which is scanned on explicit request.
       void loadFresh();
-      if (sp.get("run") === "1") {
+      if (sp.get("run") === "1" && sp.get("preset") !== CHINA_PRESET) {
         setFirstRun(true);
         void startJobScan(f);
       }
@@ -126,13 +129,22 @@ export function ExplorerView({
   );
 
   const isAi = mode === "ai";
-  if (running) return isAi ? <AiHuntView cliName={cli.name} /> : <DiscoveringState />;
-
-  const canDiscover = filters.ats.length > 0;
   const isResults = phase === "results";
+  const employer = filters.preset === CHINA_PRESET;
+  const canDiscover = !running && (employer ? (filters.employers?.length ?? 0) > 0 : filters.ats.length > 0);
+  const scanRunning = running && !isAi && !employer;
+  // Keep one ResultsList mounted across scanning → revealing → results so
+  // filter/sort/scroll and co-rise survive the 850ms reveal handoff.
+  const showScanList = !isAi && offers.length > 0 && (scanRunning || isResults);
+
+  if (running && isAi) return <AiHuntView cliName={cli.name} />;
 
   return (
-    <div className="mx-auto max-w-5xl px-5 py-8 md:px-8">
+    <div className={scanRunning ? undefined : "mx-auto max-w-5xl px-5 py-8 md:px-8"}>
+      <p role="status" aria-live="polite" aria-atomic="true" className="mb-4 text-sm text-muted">{!isAi && (employerOutcome?.message || (employer && running ? "Scanning selected employers…" : ""))}</p>
+      {scanRunning && <DiscoveringState />}
+      {!scanRunning && (
+        <>
       <header className="mb-6">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2.5">
@@ -148,7 +160,7 @@ export function ExplorerView({
           <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted">
             {isAi
               ? "Describe the role in plain language — an AI hunts the open web for it, on your own AI. Candidates are unverified until you evaluate."
-              : "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one."}
+              : employer ? "Scan selected employer sites using your role and location terms, zero tokens. Open an original JD to check its details." : "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one."}
           </p>
         )}
       </header>
@@ -188,7 +200,7 @@ export function ExplorerView({
       ) : (
         <>
           <ScanJobBanner scan={scanJob} />
-          {isResults ? (
+          {isResults && !employer ? (
             <div className="mb-6 rounded-xl border border-border bg-surface/30">
               <div className="flex w-full items-center gap-2 px-4 py-3">
                 <button type="button" onClick={() => setRefineOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-sm font-medium text-foreground">
@@ -211,20 +223,25 @@ export function ExplorerView({
               </div>
               {refineOpen && (
                 <div className="space-y-4 border-t border-border p-4">
-                  <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
+                  <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} disabled={running} />
                 </div>
               )}
             </div>
           ) : (
             <div className="mb-6 rounded-2xl border border-border bg-surface/30 p-5">
-              <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
+              <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} disabled={running} />
               <div className="mt-5">
-                <DiscoverBar canDiscover={canDiscover && !scanJob.running} onDiscover={() => startScan()} label={scanJob.running ? "Scan running…" : "Discover (free)"} />
+                <DiscoverBar
+                  canDiscover={canDiscover && (employer || !scanJob.running)}
+                  onDiscover={() => (employer ? void discover() : startScan())}
+                  label={!employer && scanJob.running ? "Scan running…" : "Discover (free)"}
+                  filters={filters}
+                />
               </div>
             </div>
           )}
 
-          {isResults && firstRun && (
+          {isResults && firstRun && !employerOutcome && (
             <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
               <Sparkles className="mt-0.5 size-4 shrink-0 text-emerald-500" />
               <p className="text-[13px] leading-relaxed text-foreground">
@@ -236,9 +253,20 @@ export function ExplorerView({
           {isResults && capHit && (
             <CappedBanner companiesScanned={companiesScanned} companiesAvailable={companiesAvailable} onRefine={() => setRefineOpen(true)} />
           )}
-          {isResults && <ResultsList offers={enriched} />}
+        </>
+      )}
+      </>
+      )}
 
-          {phase === "empty-current" && (
+      {showScanList && (
+        <div className={scanRunning ? "relative z-[1] mx-auto max-w-5xl px-5 pb-10 md:px-8" : undefined}>
+          <ResultsList offers={enriched} />
+        </div>
+      )}
+
+      {!scanRunning && !isAi && (
+        <>
+          {!employerOutcome && phase === "empty-current" && (
             <EmptyState
               tone="good"
               title="You're all caught up."
@@ -252,7 +280,7 @@ export function ExplorerView({
               rerunLabel="Look back 30 days"
             />
           )}
-          {phase === "empty-loose" && (
+          {!employerOutcome && phase === "empty-loose" && (
             <EmptyState
               tone="loose"
               title="No fresh matches — yet."
@@ -266,7 +294,7 @@ export function ExplorerView({
               rerunLabel="Widen to 30 days · clear location"
             />
           )}
-          {phase === "degraded" && (
+          {!employerOutcome && phase === "degraded" && (
             <DegradedCard
               onRetry={() => startScan()}
               companiesScanned={companiesScanned}
@@ -276,24 +304,28 @@ export function ExplorerView({
               partial={partial}
             />
           )}
-          {phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => startScan()} />}
+          {!employerOutcome && phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => startScan()} />}
         </>
       )}
     </div>
   );
 }
 
-function DiscoverBar({ canDiscover, onDiscover, label }: { canDiscover: boolean; onDiscover: () => void; label: string }) {
+function DiscoverBar({ canDiscover, onDiscover, label, filters }: { canDiscover: boolean; onDiscover: () => void; label: string; filters: ExploreFilters }) {
+  const { running } = useExplore();
   return (
     <div className="flex flex-wrap items-center gap-3">
       <button
         type="button"
-        disabled={!canDiscover}
-        onClick={onDiscover}
+        disabled={!canDiscover && !running}
+        aria-disabled={!canDiscover}
+        aria-describedby={filters.preset === CHINA_PRESET ? "employer-selection" : undefined}
+        onClick={() => { if (canDiscover) onDiscover(); }}
         className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50 max-sm:min-h-[44px]"
       >
         <Compass className="size-4" /> {label}
       </button>
+      {filters.preset !== CHINA_PRESET && <ScheduleJobAction filters={filters} />}
       <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
         <span className="size-1.5 rounded-full bg-emerald-500" />
         Evaluating a role later costs tokens. Discovering never does.

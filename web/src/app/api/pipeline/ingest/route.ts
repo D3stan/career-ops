@@ -4,6 +4,7 @@ import path from "node:path";
 import { withPipelineLock, PipelineBusyError, getDataRoot } from "../../../../lib/core/pipeline-lock.mjs";
 import { atomicWrite } from "../../../../lib/core/safe-write.mjs";
 import { normalizeUrl } from "../../../../lib/core/url-key.mjs";
+import { readJsonObject } from "../../../../lib/json-body.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -143,14 +144,8 @@ export async function POST(req: Request) {
   }
 
   // Body parsing and validation
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ ok: false, error: "Invalid payload: jobs array required" }, { status: 400 });
-  }
-
-  if (!body || typeof body !== "object" || !Array.isArray(body.jobs)) {
+  const body = await readJsonObject<{ jobs?: unknown }>(req);
+  if (!body || !Array.isArray(body.jobs)) {
     return Response.json({ ok: false, error: "Invalid payload: jobs array required" }, { status: 400 });
   }
 

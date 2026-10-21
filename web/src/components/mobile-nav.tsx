@@ -10,7 +10,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { WorkerPills } from "@/components/jobs/worker-pills";
 import { UsageMeter } from "@/components/usage-meter";
 import { instrumentSerif } from "@/lib/fonts";
-import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
+import { visibleNavItems, isActivePath } from "@/lib/nav-items";
 import { useJobs } from "@/components/jobs/job-store";
 
 // Mobile navigation (< md): a glass top bar + a right-side slide-over drawer that
@@ -34,7 +34,7 @@ const STYLE = `
 @media(prefers-reduced-motion:reduce){.co-mdrawer,.co-mscrim{transition:none}.co-pulse{animation:none}}
 `;
 
-export function MobileNav() {
+export function MobileNav({ followupsEnabled }: { followupsEnabled: boolean }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
@@ -150,7 +150,7 @@ export function MobileNav() {
         </div>
 
         <nav className="flex flex-col gap-1 px-3">
-          {NAV_ITEMS.map(({ href, label, icon: Icon, chip }) => {
+          {visibleNavItems(followupsEnabled).map(({ href, label, icon: Icon, chip }) => {
             const active = isActivePath(href, pathname);
             return (
               <Link
@@ -181,9 +181,12 @@ export function MobileNav() {
 
         <div className="co-msafe mt-auto space-y-3 border-t border-border px-4 pt-4">
           <UsageMeter />
-          <div className="flex items-center justify-between">
-            <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
-            <ThemeToggle />
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
+              <span className="font-mono text-[10px] text-faint">THEME</span>
+            </div>
+            <ThemeToggle showLabel className="bg-surface-hover/40" />
           </div>
         </div>
       </aside>

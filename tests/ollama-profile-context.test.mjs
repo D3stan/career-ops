@@ -9,7 +9,7 @@ import {
   copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, ownRootEnv, NODE, ROOT } from './helpers.mjs';
 
 console.log('\nollama-eval — includes profile.yml and _profile.md in model context (#2488)');
 
@@ -30,13 +30,23 @@ for (const relativePath of [
   // tracker-utils imports the shared lock-contention helpers (#2777 fix):
   // a fixture that carries tracker-utils has to carry its import too.
   'pipeline-lock.mjs',
+  // ...which runs the shared lock protocol from lib/dir-lock.mjs (#5358).
+  'lib/dir-lock.mjs',
+  'lib/yaml-document.mjs',
   // ollama-eval/reserve-report-num resolve user-layer paths via
   // path-resolver.mjs (CAREER_OPS_ROOT), so the fixture carries that too.
   'path-resolver.mjs',
   'lib/context-budget.mjs',
+  // ollama-eval builds its tracker-addition row with the shared helpers
+  // (#3796), so the fixture has to carry the module they were consolidated
+  // into -- same reason pipeline-lock.mjs is on this list.
+  'lib/tracker-addition.mjs',
   // reserve-report-num.mjs's main-guard comes from lib/is-main-module.mjs
   // (#3170), so a fixture that carries it has to carry the helper too.
   'lib/is-main-module.mjs',
+  // ollama-eval dates its report with localToday() rather than the UTC day,
+  // so the fixture has to carry that helper for the module to load at all.
+  'lib/local-today.mjs',
   'utils/token-tracker.mjs',
 ]) {
   copyIntoFixture(relativePath);
@@ -106,7 +116,9 @@ try {
     execFile(
       NODE,
       [join(fixtureRoot, 'ollama-eval.mjs'), '--url', `http://127.0.0.1:${port}`, '--no-save', 'On-site role.'],
-      { timeout: 30000 },
+      // The fixture is its own data root; without this the evaluator reads
+      // the profile from the root the suite pins, not the one written above.
+      { timeout: 30000, env: ownRootEnv() },
       (error, stdout, stderr) => resolve({ error, stdout, stderr }),
     );
   });

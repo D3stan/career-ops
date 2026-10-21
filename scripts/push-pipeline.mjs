@@ -13,6 +13,7 @@
 
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { isMainModule } from '../lib/is-main-module.mjs';
 
 export const USAGE = `Usage:
   node scripts/push-pipeline.mjs --remote <url> --token <secret> [--file <path>] [--source <name>] [--dry-run]
@@ -227,7 +228,7 @@ export async function main() {
 }
 
 // Run main if executed directly
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`Unexpected error: ${err.message}`);
     process.exit(1);

@@ -10,6 +10,7 @@ import {
   localToday,
   type ParsedQuickApply,
 } from "@/lib/quick-apply";
+import { readJsonObject } from "@/lib/json-body";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -101,14 +102,8 @@ export async function POST(req: Request) {
   }
 
   // 2. Body & URL parsing
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Missing or invalid url" }, { status: 400 });
-  }
-
-  if (!body || typeof body !== "object" || !body.url || typeof body.url !== "string") {
+  const body = await readJsonObject<{ url?: unknown }>(req);
+  if (!body || typeof body.url !== "string" || !body.url) {
     return Response.json({ error: "Missing or invalid url" }, { status: 400 });
   }
 

@@ -11,8 +11,9 @@ type AntigravityUsage =
   | { source: "antigravity"; ok: false };
 type Usage = ClaudeUsage | AntigravityUsage;
 
-// Soft budgets (tunable via localStorage `career-ops:usage-budget`). The bar
-// colour is the "brake" signal — set these to your plan's real limits.
+// Soft total-activity budgets, including Claude cache reads. Persisted
+// `career-ops:usage-budget` values remain authoritative, so users who calibrated
+// this brake signal to their plan keep their own ceilings.
 const DEFAULT_BUDGET = { w5: 140_000_000, w7: 1_000_000_000 };
 
 function fmt(n: number): string {

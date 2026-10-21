@@ -9,6 +9,7 @@ import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { titleSieveArgs } from "@/lib/title-sieve-args.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
+import { readJsonObject } from "@/lib/json-body";
 
 // Title sieve: a title-only first pass over the listings Explore is showing.
 // The prompt, the answer parser and every file write live in the core's
@@ -127,12 +128,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let body: { cliId?: string; offers?: unknown[] };
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
-  }
+  const body = await readJsonObject<{ cliId?: string; offers?: unknown[] }>(req);
+  if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const cliId = body.cliId || "";
   if (!cliId) return Response.json({ error: "Pick a CLI in Settings first — the sieve runs on your own AI." }, { status: 400 });
   const core = await loadCore();

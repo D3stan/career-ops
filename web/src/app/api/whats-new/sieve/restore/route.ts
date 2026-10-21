@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { readJsonObject } from "@/lib/json-body";
 
 // Undo a title-sieve drop. The core does the reversal (sieve log, scan history,
 // pipeline) — this route only forwards the URL to `title-sieve.mjs --restore`.
@@ -8,12 +9,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  let url = "";
-  try {
-    url = String(((await req.json()) as { url?: unknown }).url ?? "").trim();
-  } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
-  }
+  const body = await readJsonObject<{ url?: unknown }>(req);
+  if (!body) return Response.json({ error: "bad json" }, { status: 400 });
+  const url = String(body.url ?? "").trim();
   if (!/^https?:\/\//i.test(url)) return Response.json({ error: "url required" }, { status: 400 });
   const script = rootScript("title-sieve");
   if (!fs.existsSync(script)) return Response.json({ error: "This checkout has no title-sieve.mjs — update career-ops." }, { status: 400 });

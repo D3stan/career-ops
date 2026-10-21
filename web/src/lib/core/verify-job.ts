@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { careerOpsRoot, portalsConfigPath, rootScript } from "@/lib/career-ops";
 
 /**
  * Background "Check portal health": ONE detached run of the core's
@@ -81,7 +81,7 @@ function isAlive(pid?: number): boolean {
 /** True when this checkout can run a health check at all — mirrors the old route's `available`/`configured`. */
 export function verifyAvailability(): { available: boolean; configured: boolean } {
   const available = fs.existsSync(rootScript("verify-portals"));
-  const configured = available && fs.existsSync(path.join(careerOpsRoot(), "portals.yml"));
+  const configured = available && fs.existsSync(portalsConfigPath(careerOpsRoot()));
   return { available, configured };
 }
 

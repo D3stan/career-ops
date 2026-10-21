@@ -18,12 +18,20 @@ import { readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, join, relative, isAbsolute } from "path";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
-import { assertFacts } from "./verify-cv-facts.mjs";
+import { assertFacts, printFactWarnings } from "./verify-cv-facts.mjs";
 import { resolveTemplate } from "./cv-templates.mjs";
 import { isMainModule } from "./lib/is-main-module.mjs";
+import { PAGE_FORMATS, normalizePageFormat, pageFormatForCountry } from "./lib/page-format.mjs";
+import { getCareerOpsRoot } from "./path-resolver.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const OUTPUT_ROOT = resolve(__dirname, "output");
+// output/ is a USER-layer directory. Anchoring it to the script directory made
+// the cover letter unwritable under an external data directory: this module
+// insisted on <checkout>/output while the shared PDF guard in generate-pdf.mjs
+// required the tracker workspace, and the two could not both be satisfied.
+// getCareerOpsRoot() returns the checkout when no external root is configured,
+// so the default install is unchanged.
+const OUTPUT_ROOT = resolve(getCareerOpsRoot(), "output");
 
 /**
  * Resolve a requested cover-letter output path.
@@ -124,10 +132,122 @@ function buildCredentialsBlock(candidate) {
 }
 
 /** Build the escaped company, city, and date line for the letter. */
-function buildDateline(letter) {
-  const parts = [letter.company, letter.city, letter.date].filter(Boolean).map(escapeHtml);
-  return parts.join(" &nbsp;&nbsp; ");
+function buildDateline(letter, hasRecipientBlock = false) {
+  // The pack contract gives {{DATELINE}} the date and leaves the company and
+  // city to the address block directly beneath it, so joining all three prints
+  // the company twice, three lines apart.
+  //
+  // Gated on the block actually RENDERING, not on `letter.recipient` merely
+  // being set — see the caller, which needs both the data and a template slot
+  // to conclude that. An empty or whitespace-only recipient produces no address
+  // block, and a template without a {{RECIPIENT_BLOCK}} slot has nowhere to put
+  // one; either way, dropping company and city would lose them with nothing
+  // taking their place. The shipped base template is the second case, so it
+  // keeps the full join exactly as before.
+  const parts = hasRecipientBlock
+    ? [letter.date]
+    : [letter.company, letter.city, letter.date];
+  return parts.filter(Boolean).map(escapeHtml).join(" &nbsp;&nbsp; ");
 }
+
+/**
+ * Build the optional recipient address block for a business letter.
+ *
+ * The pack authoring contract places {{RECIPIENT_BLOCK}} bare and expects the
+ * filler to emit its own wrapper, so this returns a complete
+ * `<div class="recipient">` or an empty string, never a bare fragment. Each
+ * line is its own `<div>` rather than a `<br>` join, which is what the packs'
+ * own CSS targets.
+ *
+ * A partial recipient is normal and renders as far as it goes: a company with
+ * no named individual, or a name with no street address, are both ordinary
+ * states for a cover letter. Only a recipient with nothing usable in it (blank or whitespace-only fields included), or no
+ * recipient at all, yields the empty string, so a letter without an addressee
+ * still renders instead of failing.
+ *
+ * Accepts `address_lines` (array, the contract's shape) or `address` (string).
+ */
+function buildRecipientBlock(letter) {
+  const r = letter.recipient;
+  if (!r || typeof r !== "object") return "";
+  const addressLines = Array.isArray(r.address_lines)
+    ? r.address_lines
+    : r.address
+      ? [r.address]
+      : [];
+  // Trim before filtering: `filter(Boolean)` alone keeps "   ", which renders as
+  // a blank line inside the wrapper rather than as the absent field it is.
+  // Falsy first, so 0 / "" / null drop out as they always have, THEN coerce.
+  // Coercing first would turn 0 into the string "0" and keep it as an address
+  // line; leaving a truthy non-string uncoerced crashes the compare below.
+  const lines = [r.name, r.title, r.company, ...addressLines]
+    .filter(Boolean)
+    .map((v) => String(v).trim())
+    .filter(Boolean);
+  if (!lines.length) return "";
+
+  // Once this block renders, the dateline drops the company and city, so they
+  // have to land here or they leave the letter entirely. A recipient given as a
+  // bare name is the case that exposed it: the block held one line, the dateline
+  // went date-only, and both values were simply gone from the output.
+  //
+  // Appended only when the recipient did not already supply them, compared
+  // case-insensitively against every line including the address, so a recipient
+  // that names its own company keeps exactly one copy.
+  // Compared by comma-delimited component, not by whole line. An address line
+  // is routinely "123 Main St, Boston, MA" while letter.city is "Boston, MA":
+  // the lines differ, so a whole-line compare appends the city a second time,
+  // which is the duplication this whole change exists to stop.
+  // A trailing US ZIP is stripped from the LAST component only. "Boston, MA
+  // 02101" and the city "Boston, MA" otherwise differ in that component and the
+  // city gets appended a second time, and an address carrying a ZIP is the
+  // ordinary case rather than an edge one. Confined to the final component and
+  // to a recognisable ZIP shape, so a street number cannot be eaten; formats
+  // this cannot recognise simply keep today's behaviour.
+  const components = (v) => {
+    const parts = String(v)
+      .split(",")
+      .map((part) => part.toLowerCase().replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    if (parts.length) {
+      const last = parts[parts.length - 1].replace(/\s+\d{5}(?:-\d{4})?$/, "").trim();
+      if (last) parts[parts.length - 1] = last;
+    }
+    return parts;
+  };
+
+  /** Does `hay` contain `needle` as a contiguous run of components? */
+  const containsRun = (hay, needle) => {
+    if (!needle.length || needle.length > hay.length) return false;
+    for (let i = 0; i + needle.length <= hay.length; i++) {
+      if (needle.every((n, j) => hay[i + j] === n)) return true;
+    }
+    return false;
+  };
+
+  // Where each one belongs differs, so they are not both appended. A company
+  // goes straight after the recipient's name and title and ABOVE the street
+  // address; pushing it to the end put it below the street, which is not an
+  // address block (#4069 review). The city stays last, where it already sat.
+  // `lines` starts as name, title, company, then the address lines, all through
+  // the same filters, so the first `headCount` entries are exactly that head.
+  const headCount = [r.name, r.title, r.company]
+    .filter(Boolean)
+    .map((v) => String(v).trim())
+    .filter(Boolean).length;
+  for (const [extra, insertAt] of [[letter.company, headCount], [letter.city, null]]) {
+    const v = typeof extra === "string" ? extra.trim() : "";
+    if (!v) continue;
+    const want = components(v);
+    if (lines.some((l) => containsRun(components(l), want))) continue;
+    if (insertAt === null) lines.push(v);
+    else lines.splice(insertAt, 0, v);
+  }
+
+  const escaped = lines.map(escapeHtml);
+  return `<div class="recipient">\n${escaped.map((l) => `    <div>${l}</div>`).join("\n")}\n  </div>`;
+}
+
 
 /** Build the optional achievements list for the letter body. */
 function buildAchievementsBlock(achievements) {
@@ -220,12 +340,21 @@ export function buildHtml(payload, templatePath) {
   // valediction. The <br> is emitted around escaped values, never inside one.
   const signatureBlock = buildSignatureBlock(letter.signature, candidate.name);
 
+  const recipientBlock = buildRecipientBlock(letter);
+  // The gate's predicate is "the address block will RENDER", which needs both
+  // halves: recipient data to put in it, and a slot in the loaded template to
+  // put it in. The shipped base template has {{DATELINE}} and no
+  // {{RECIPIENT_BLOCK}}, so a payload carrying a recipient would otherwise lose
+  // the company and city entirely — dropped from the dateline, with no address
+  // block downstream to reprint them.
+  const rendersRecipientBlock = Boolean(recipientBlock) && html.includes("{{RECIPIENT_BLOCK}}");
   const replacements = {
     "{{NAME}}": escapeHtml(candidate.name),
     "{{CONTACT_LINE}}": buildContactLine(candidate),
     "{{CREDENTIALS_BLOCK}}": buildCredentialsBlock(candidate),
     "{{ROLE_TITLE}}": escapeHtml(letter.role_title),
-    "{{DATELINE}}": buildDateline(letter),
+    "{{DATELINE}}": buildDateline(letter, rendersRecipientBlock),
+    "{{RECIPIENT_BLOCK}}": recipientBlock,
     "{{GREETING_BLOCK}}": greetingBlock,
     "{{OPENING}}": escapeHtml(letter.opening),
     "{{PROFILE_INTRO}}": escapeHtml(letter.profile_intro),
@@ -266,6 +395,27 @@ export function buildHtml(payload, templatePath) {
   return rendered;
 }
 
+/**
+ * Answers and other text the candidate supplied for this letter.
+ *
+ * Read `user_inputs` (the list cover mode writes) and `answers` (the same
+ * texts as an object). Do not read `letter`: the draft is the document under
+ * check, and a sentence that appears only there must not support itself.
+ *
+ * @param {object} [payload]
+ * @returns {string[]}
+ */
+export function letterInputTexts(payload = {}) {
+  return [...collectInputText(payload?.user_inputs), ...collectInputText(payload?.answers)];
+}
+
+function collectInputText(value) {
+  if (typeof value === 'string') return value.trim() ? [value] : [];
+  if (Array.isArray(value)) return value.flatMap(collectInputText);
+  if (value && typeof value === 'object') return Object.values(value).flatMap(collectInputText);
+  return [];
+}
+
 /** Parse a payload, run the fact gate, and render the cover-letter PDF. */
 async function main() {
   const { values: args } = parseArgs({
@@ -273,6 +423,7 @@ async function main() {
       payload: { type: "string" },
       out:     { type: "string" },
       format:  { type: "string" },
+      country: { type: "string" },
       report:  { type: "string" },
       help:    { type: "boolean", short: "h" },
     },
@@ -282,14 +433,29 @@ async function main() {
   if (args.help || !args.payload) {
     console.log(`
 Usage:
-  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf] [--format letter|a4] [--report NNN]
+  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf] [--format letter|a4] [--country XX] [--report NNN]
 
   --payload   Path to the JSON payload file (required)
   --out       Override output path from payload (optional)
-  --format    Override output PDF page format (letter|a4, default: a4)
+  --format    Override output PDF page format (letter|a4). Defaults to
+              config/profile.yml page_format, then letter.
+  --country   Employer's ISO 3166-1 country code (e.g. DE). Picks the sheet
+              only when page_format is "auto". Defaults to the payload's country.
   --report    Link the PDF to a tracker report number in data/pdf-index.tsv
 `);
     process.exit(args.help ? 0 : 1);
+  }
+
+  // Supplied flags are validated like generate-pdf.mjs does. A typo that fell
+  // through to the profile or the payload would print a letter on the wrong sheet.
+  // `auto` is a profile or payload value, never a sheet, so --format rejects it.
+  if (args.format !== undefined && !normalizePageFormat(args.format)) {
+    console.error(`Invalid format "${args.format}". Use: ${[...PAGE_FORMATS].join(", ")}`);
+    process.exit(1);
+  }
+  if (args.country !== undefined && !pageFormatForCountry(args.country)) {
+    console.error(`Invalid country "${args.country}". Use a two-letter ISO 3166-1 code, e.g. --country=DE.`);
+    process.exit(1);
   }
 
   const payloadPath = resolve(args.payload);
@@ -324,7 +490,10 @@ Usage:
     // Cover letters are candidate-facing documents too. Reuse the CV fact
     // validator before importing Playwright or writing a PDF so a failed gate
     // cannot leave behind a misleading artifact.
-    const factCheck = assertFacts(html, { label: "cover letter" });
+    const factCheck = assertFacts(html, {
+      label: "cover letter",
+      planTexts: letterInputTexts(payload),
+    });
     // Ahead of the verdict, because it qualifies it: with no config the phrase
     // lists are empty, so a silent gate here covers metrics and facts only.
     if (factCheck.configMissing) {
@@ -332,17 +501,22 @@ Usage:
     }
     if (factCheck.verdict === "warn") {
       console.error(`CV fact check warning: cover letter`);
-      for (const phrase of factCheck.warnings) {
-        console.error(`  - advisory phrase: ${phrase}`);
-      }
+      printFactWarnings(factCheck, console.error);
     }
     // Imported only after fact validation so a failed gate does not load
     // Playwright or create a PDF artifact.
     const { renderHtmlToPdf } = await import("./generate-pdf.mjs");
     const outputPath = resolve(payload.output_path);
     await renderHtmlToPdf(html, outputPath, {
-      format: args.format || "a4",
+      // Passed through unresolved. renderHtmlToPdf ranks it against the user's
+      // config/profile.yml, so a cover letter and its CV cannot end up on
+      // different paper because only one of them carried a flag.
+      format: args.format,
+      country: args.country || payload.country,
       reportNum: args.report,
+      // Declared, never inferred: this script always renders a cover letter, and
+      // the manifest must not file it as the report's CV (#3887).
+      kind: 'cover',
       inputPath: payloadPath,
     });
     console.log(`\nCover letter PDF: ${payload.output_path}`);

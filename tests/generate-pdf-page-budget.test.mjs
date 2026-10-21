@@ -14,9 +14,11 @@ import {
 import { isAbsolute, join, relative } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { pass, fail, linkRepoPackage, ROOT, NODE } from './helpers.mjs';
+import { pass, fail, linkRepoPackage, ownRootEnv, ROOT, NODE, SANDBOX_DATA_ROOT } from './helpers.mjs';
 
-const outputRoot = join(ROOT, 'output');
+// Under the suite's own data root, not the checkout's output/: that directory
+// is the developer's, and an interrupted run left this fixture in it (#5113).
+const outputRoot = join(SANDBOX_DATA_ROOT, 'output');
 mkdirSync(outputRoot, { recursive: true });
 // realpathSync, not the raw mkdtemp path: Node resolves both `import.meta.url`
 // and a module's node_modules walk from a file's REALPATH, while
@@ -40,6 +42,9 @@ copyFileSync(join(ROOT, 'generate-pdf.mjs'), script);
 // theming, #1837); copy it into the sandbox too or the isolated script fails
 // to load with ERR_MODULE_NOT_FOUND before it can parse any --max-pages arg.
 copyFileSync(join(ROOT, 'theme-style.mjs'), join(sandbox, 'theme-style.mjs'));
+// Same reason for ./cv-experience-order.mjs (reverse-chronological guard): it is a
+// local sibling import of generate-pdf.mjs, so the sandbox needs its own copy.
+copyFileSync(join(ROOT, 'cv-experience-order.mjs'), join(sandbox, 'cv-experience-order.mjs'));
 // generate-pdf resolves output and manifest paths from the tracker-owned
 // workspace. Copy the shared resolver and its local parser dependency so this
 // remains a genuinely isolated CLI test.
@@ -47,13 +52,23 @@ copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(sandbox, 'tracker-utils.mjs')
 copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(sandbox, 'tracker-parse.mjs'));
 copyFileSync(join(ROOT, 'tracker-aliases.json'), join(sandbox, 'tracker-aliases.json'));
 copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(sandbox, 'pipeline-lock.mjs'));
+// ...and it strips the optional sections that rendered as a bare header via
+// ./cv-sections-core.mjs (#3986), another local sibling this sandbox needs.
+copyFileSync(join(ROOT, 'cv-sections-core.mjs'), join(sandbox, 'cv-sections-core.mjs'));
 // ...and generate-pdf resolves user-layer paths via path-resolver.mjs
 // (CAREER_OPS_ROOT), so the fixture carries that too.
 copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
 // generate-pdf.mjs's main-guard lives in lib/is-main-module.mjs (#3170). Without
 // it the copy dies with ERR_MODULE_NOT_FOUND before parsing an argument.
+// lib/page-format.mjs owns the paper size the @page rule is built from, and
+// generate-pdf.mjs imports it at module scope — same ERR_MODULE_NOT_FOUND
+// without it.
 mkdirSync(join(sandbox, 'lib'), { recursive: true });
 copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
+copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
+// pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
+copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
+copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(sandbox, 'lib', 'yaml-document.mjs'));
 
 // theme-style.mjs and tracker-utils.mjs both `import * as yaml from 'js-yaml'`,
 // which resolves by walking up into the repo's node_modules -- from the
@@ -68,7 +83,7 @@ writeFileSync(join(playwrightStub, 'package.json'), JSON.stringify({
   exports: './index.js',
 }), 'utf-8');
 writeFileSync(join(playwrightStub, 'index.js'), `
-import { readFile } from 'fs/promises';
+import { readFile, writeFile } from 'fs/promises';
 
 const twoPagePdf = Buffer.from(\`%PDF-1.7
 1 0 obj
@@ -117,6 +132,10 @@ export const chromium = {
         return {
           async goto(url) {
             const html = await readFile(new URL(url), 'utf-8');
+            // Keep the document that actually reached the renderer, after every
+            // transform generate-pdf.mjs applies to it. Written to the sandbox
+            // (the spawned script's cwd) so a case can assert on it.
+            await writeFile('.rendered.html', html, 'utf-8');
             renderedPdf = html.includes('THREE_PAGE_FIXTURE') ? threePagePdf : twoPagePdf;
           },
           async evaluate() {},
@@ -151,7 +170,7 @@ copyFileSync(input, externalInput);
 function runPdf(args, env = {}) {
   const result = spawnSync(NODE, [script, ...args], {
     cwd: sandbox,
-    env: { ...process.env, ...env },
+    env: ownRootEnv(env),
     encoding: 'utf-8',
     timeout: 30_000,
   });
@@ -371,6 +390,55 @@ try {
     pass('renderHtmlToPdf keeps an external baseDir temporary file inside the workspace');
   } else {
     fail(`renderHtmlToPdf placed its temporary file outside the workspace: ${observedTempPath}`);
+  }
+  // --- Optional sections that arrived as a bare header (#3986) -------------
+  // The builders strip these from the payload before filling a template, but
+  // neither builder runs on the web pdf path: the agent emits finished HTML,
+  // which reaches this script with the empty wrappers intact. Assert on the
+  // document the renderer actually received, so removing the call in
+  // generate-pdf.mjs fails here and not only in the unit suite for the module.
+  const bareHeaderInput = join(sandbox, 'bare-header-sections.html');
+  writeFileSync(bareHeaderInput, `<!doctype html>
+<html>
+  <body>
+    <!-- WORK EXPERIENCE -->
+    <div class="section">
+      <div class="section-title">Work Experience</div>
+      <div class="job">Staff Engineer, Acme</div>
+    </div>
+
+    <!-- PROJECTS -->
+    <div class="section">
+      <div class="section-title">Projects</div>
+    </div>
+
+    <!-- EDUCATION -->
+    <div class="section">
+      <div class="section-title">Education</div>
+      <div class="edu">BSc, 2015</div>
+    </div>
+
+    <!-- END -->
+  </body>
+</html>
+`, 'utf-8');
+  const bareHeaderPdf = join(sandbox, 'bare-header-sections.pdf');
+  const bareHeaderRun = runPdf([bareHeaderInput, bareHeaderPdf]);
+  const renderedHtml = existsSync(join(sandbox, '.rendered.html'))
+    ? readFileSync(join(sandbox, '.rendered.html'), 'utf-8')
+    : '';
+  if (
+    bareHeaderRun.status === 0 &&
+    renderedHtml !== '' &&
+    !renderedHtml.includes('<!-- PROJECTS -->') &&
+    renderedHtml.includes('<!-- WORK EXPERIENCE -->') &&
+    renderedHtml.includes('Staff Engineer, Acme') &&
+    renderedHtml.includes('<!-- EDUCATION -->') &&
+    renderedHtml.includes('BSc, 2015')
+  ) {
+    pass('generate-pdf drops a section that arrived as a bare header and keeps the populated ones');
+  } else {
+    fail(`generate-pdf did not strip the empty Projects section from the rendered document: ${bareHeaderRun.output.trim()}`);
   }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });

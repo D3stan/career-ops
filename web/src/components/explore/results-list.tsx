@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Search, Plus } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { DiscoveredOffer } from "@/lib/explore";
+import { CHINA_SOURCES } from "@/lib/employer-preset.mjs";
 import { CostBadge } from "@/components/cost/cost-badge";
 import { DiscoveryCard } from "./discovery-card";
 import { useExplore } from "./explore-provider";
@@ -12,8 +13,9 @@ import { SieveBar, sieveRank, useTitleSieve } from "./title-sieve";
 export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; evaluatedN?: string };
 
 export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
-  const { companiesScanned, partial, addToPipeline, added, mode } = useExplore();
+  const { companiesScanned, partial, error, addToPipeline, added, mode, running } = useExplore();
   const isAi = mode === "ai";
+  const employer = offers.some(o => CHINA_SOURCES.includes(o.source));
   const [sort, setSort] = useState<"fresh" | "company" | "fit">("fresh");
   const [q, setQ] = useState("");
   const sieve = useTitleSieve();
@@ -45,14 +47,15 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <p className="text-sm text-foreground">
-            <span className="font-semibold">{shown.length}</span> {isAi ? `candidate${shown.length === 1 ? "" : "s"}` : `fresh role${shown.length === 1 ? "" : "s"}`}
+            <span className="font-semibold">{shown.length}</span> {isAi ? `candidate${shown.length === 1 ? "" : "s"}` : employer ? `match${shown.length === 1 ? "" : "es"}` : `fresh role${shown.length === 1 ? "" : "s"}`}
             <CostBadge kind={isAi ? "spend" : "free-network"} size="xs" className="ml-2 align-middle" />
           </p>
           <p className="text-[12px] text-faint">
             {isAi
               ? "found by AI on the open web · unverified until you evaluate"
-              : `${companiesScanned > 0 ? `${companiesScanned.toLocaleString()} companies scanned · ` : ""}0 tokens spent${partial ? " · some boards were unreachable (normal for public directories)" : ""}`}
+              : employer ? "From selected employer sites · check the original JD · 0 tokens spent" : `${companiesScanned > 0 ? `${companiesScanned.toLocaleString()} companies scanned · ` : ""}0 tokens spent${partial ? " · some boards were unreachable (normal for public directories)" : ""}`}
           </p>
+          {!isAi && error && <p className="text-[12px] text-amber-700 dark:text-amber-300">{error}</p>}
         </div>
 
         <div className="ml-auto flex items-center gap-2">
@@ -97,7 +100,9 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
         ))}
       </div>
 
-      {view.length === 0 && <p className="py-10 text-center text-sm text-faint">No results match “{q}”.</p>}
+      {view.length === 0 && (q.trim() || !running) && (
+        <p className="py-10 text-center text-sm text-faint">No results match “{q}”.</p>
+      )}
     </div>
   );
 }

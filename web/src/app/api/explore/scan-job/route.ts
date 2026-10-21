@@ -4,6 +4,7 @@ import { rootScript } from "@/lib/career-ops";
 import { cancelScanJob, getScanJob, startScanJob } from "@/lib/core/scan-job";
 import { parseExplorePatch, DEFAULT_FILTERS } from "@/lib/explore";
 import { scannerMissingBody, SCANNER_MISSING_STATUS } from "@/lib/explore-error.mjs";
+import { readJsonObject } from "@/lib/json-body";
 
 // Background Discover (see lib/core/scan-job.ts): POST starts one detached full
 // scan, GET reports it, DELETE cancels it. Free — the scanner makes no LLM calls.
@@ -15,12 +16,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  let body: Record<string, unknown> = {};
-  try {
-    body = (await req.json()) as Record<string, unknown>;
-  } catch {
-    /* empty body → defaults */
-  }
+  const body = (await readJsonObject(req)) ?? {};
   if (!fs.existsSync(rootScript("scan-ats-full"))) {
     return Response.json(scannerMissingBody(), { status: SCANNER_MISSING_STATUS });
   }
