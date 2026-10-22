@@ -131,6 +131,7 @@ RESOLVED_SPEND_TIER=""
 CLI=claude
 RATE_LIMIT_SLEEP=300
 WORKER_TIMEOUT=1800
+THIN_ACTION=webfetch   # webfetch | skip | browser-extract: what to do when the JD is still empty after the prefetch and the ATS API fallback
 BATCH_PAUSED=false
 STATUS_ONLY=false
 STATUS_FULL=true
@@ -173,6 +174,13 @@ Options:
   --skip-pdf           Skip PDF generation entirely (write ❌ in tracker PDF column)
   --worker-timeout N   Stop a worker after N seconds and record it as failed
                        (default: 1800; 0 = no limit)
+  --thin-action MODE   What to do when no usable JD text could be fetched (JS-rendered
+                       page, empty shell): 'webfetch' (default) spawns the worker and
+                       lets it try WebFetch; 'skip' records the offer as skipped with
+                       a needs-playwright marker and spawns no worker; 'browser-extract'
+                       renders the page with browser-extract.mjs (headless Chromium,
+                       zero model tokens, needs 'npx playwright install chromium') and
+                       hands the recovered text to the worker
   --rate-limit-sleep N Maximum adaptive retry delay in seconds; 0 pauses immediately
                        (default: 300; range: 0–2147483647; claude only)
   --status             Show batch progress and a per-job table, then exit
@@ -247,6 +255,14 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --model) MODEL="$2"; shift 2 ;;
+    --thin-action)
+      [[ $# -ge 2 ]] || { echo "ERROR: --thin-action requires an argument (skip, webfetch or browser-extract)"; exit 1; }
+      case "$2" in
+        skip|webfetch|browser-extract) THIN_ACTION="$2" ;;
+        *) echo "ERROR: --thin-action must be 'skip', 'webfetch' or 'browser-extract' (got '$2')."; exit 1 ;;
+      esac
+      shift 2
+      ;;
     --worker-timeout)
       if [[ $# -lt 2 ]] || ! [[ "$2" =~ ^[0-9]+$ ]]; then
         echo "ERROR: --worker-timeout must be a non-negative integer (seconds)."
@@ -328,6 +344,11 @@ check_prerequisites() {
 
   if [[ ! -f "$PROMPT_FILE" ]]; then
     echo "ERROR: $PROMPT_FILE not found."
+    exit 1
+  fi
+
+  if [[ "$THIN_ACTION" == "browser-extract" && ! -f "$PROJECT_DIR/browser-extract.mjs" ]]; then
+    echo "ERROR: --thin-action browser-extract needs browser-extract.mjs (and 'npx playwright install chromium')."
     exit 1
   fi
 
@@ -1084,6 +1105,7 @@ process_offer() {
   local prefetch_min_words=80
   local jd_prefetch_words=0
   local jd_raw_file=""
+  local curl_status=0
   if command -v curl >/dev/null 2>&1; then
     # Reject loopback, link-local, and private-network destinations before curl
     # connects. --proto/--proto-redir restrict schemes but not destination IPs,
@@ -1092,7 +1114,6 @@ process_offer() {
     local _url_safe
     local current_url="$url"
     local redirect_count=0
-    local curl_status=0
     local redirect_headers
     local redirect_location
     while :; do
@@ -1233,7 +1254,93 @@ process_offer() {
     rm -f "$jd_api_tmp"
   fi
 
+  # --thin-action: no usable JD text after the static fetch and the ATS API
+  # fallback (a JS-rendered page, an empty shell, a failed fetch). The default,
+  # 'webfetch', changes nothing: the worker is told to WebFetch. Detection only
+  # here; the skip is recorded after the "Processing offer" line below.
+  local jd_thin_skip=0 jd_thin_note="" jd_thin_retryable=0
+  if [[ ! -s "$jd_file" && "$THIN_ACTION" != "webfetch" ]]; then
+    if [[ "$THIN_ACTION" == "browser-extract" && -f "$PROJECT_DIR/browser-extract.mjs" ]]; then
+      # Real-browser read: zero model tokens, ~5-15s of Chromium. Success is
+      # compact JSON on stdout, a failure is exit 1 with a JSON error on stderr.
+      # A near-empty or taken-down page is a failure there, so the word floor
+      # below only has to stop a login wall or an error page full of navigation.
+      local be_out be_err be_words=0 be_code=""
+      be_out="$(mktemp "${TMPDIR:-/tmp}/batch-jd-browser.XXXXXX")"
+      be_err="$(mktemp "${TMPDIR:-/tmp}/batch-jd-browser-err.XXXXXX")"
+      if node "$PROJECT_DIR/browser-extract.mjs" "$url" --mode jd > "$be_out" 2> "$be_err"; then
+        node -e '
+          let d = "";
+          process.stdin.on("data", (c) => d += c);
+          process.stdin.on("end", () => {
+            try { const o = JSON.parse(d); process.stdout.write(typeof o.text === "string" ? o.text : ""); } catch { /* empty */ }
+          });
+        ' < "$be_out" > "$jd_file" 2>/dev/null || : > "$jd_file"
+        be_words=$(wc -w < "$jd_file" 2>/dev/null) || be_words=0
+        be_words="${be_words//[^0-9]/}"; be_words="${be_words:-0}"
+        if [[ "$be_words" -ge 200 ]]; then
+          echo "    🎭 Browser extract: recovered ${be_words} words"
+          jd_prefetch_words="$be_words"
+        else
+          : > "$jd_file"
+          echo "    🎭 Browser extract: no readable JD (${be_words} words)"
+        fi
+      else
+        : > "$jd_file"
+        be_code=$(node -e '
+          let d = "";
+          process.stdin.on("data", (c) => d += c);
+          process.stdin.on("end", () => { try { process.stdout.write(String(JSON.parse(d).code || "")); } catch { /* none */ } });
+        ' < "$be_err" 2>/dev/null) || be_code=""
+        echo "    🎭 Browser extract failed${be_code:+ ($be_code)}"
+        # Allowlist of transient failures worth another try. Everything else
+        # (unavailable, URL or validation errors, an unknown code) is a verdict
+        # about the page or the call and stays terminal.
+        case "$be_code" in
+          no_playwright)
+            jd_thin_retryable=1
+            jd_thin_note="browser-extract: Playwright is not installed — run 'npx playwright install chromium' and retry"
+            ;;
+          empty_text|navigation_error)
+            jd_thin_retryable=1
+            jd_thin_note="browser-extract failed ($be_code) — retryable"
+            ;;
+        esac
+      fi
+      rm -f "$be_out" "$be_err"
+    fi
+    if [[ ! -s "$jd_file" ]]; then
+      jd_thin_skip=1
+      # curl never got an HTTP response (DNS, refused, timeout, TLS): a transport
+      # problem, not a page that cannot be read. 'skipped' is terminal and
+      # --retry-failed would never pick it up again, so it stays retryable.
+      case "$curl_status" in
+        6|7|28|35|52|55|56)
+          jd_thin_retryable=1
+          [[ -n "$jd_thin_note" ]] || jd_thin_note="JD prefetch failed to connect (curl exit $curl_status) — retryable"
+          ;;
+      esac
+      [[ -n "$jd_thin_note" ]] || jd_thin_note="no usable JD text (--thin-action $THIN_ACTION) — needs-playwright"
+    fi
+  fi
+
   echo "--- Processing offer #$id${JOB_POS:+ ($JOB_POS)}: $url (report $report_num, attempt $((retries + 1)))"
+
+  if [[ "$jd_thin_skip" == "1" ]]; then
+    local thin_state="skipped" thin_now
+    local thin_retries="$retries"
+    if [[ "$jd_thin_retryable" == "1" ]]; then
+      thin_state="failed"
+      # Spend one retry so --retry-failed stops at MAX_RETRIES instead of looping.
+      (( thin_retries < MAX_RETRIES )) && thin_retries=$((retries + 1))
+    fi
+    thin_now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    update_state_retrying "$id" "$url" "$thin_state" "$started_at" "$thin_now" "-" "-" "$jd_thin_note" "$thin_retries" || true
+    release_report_num "$report_num"
+    rm -f "$jd_file"
+    echo "    🚫 $jd_thin_note — no worker spawned"
+    return 0
+  fi
 
   # Build the prompt with placeholders replaced
   local prompt
@@ -1290,7 +1397,13 @@ process_offer() {
   # except the personalization injected below, so name the file this run uses.
   # With the data root outside the checkout the runtime block above already
   # does that, so this only fills the default layout.
-  if [[ "$PROFILE_RESOLVED" == "true" && "$PROFILE_FILE" != "$DATA_ROOT/config/profile.yml" && "$DATA_ROOT" == "$PROJECT_DIR" ]]; then
+  # The override is checked first, the way hasProfileOverride() does it, and
+  # the path comparison only after it. With no override the two paths are the
+  # same file, but not always the same string: through a junction or symlink
+  # getProfilePath() returns the real path while DATA_ROOT keeps the one pwd
+  # gave, and that alone used to add this block.
+  local profile_override="${CAREER_OPS_PROFILE:-}"
+  if [[ -n "${profile_override//[[:space:]]/}" && "$PROFILE_RESOLVED" == "true" && "$PROFILE_FILE" != "$DATA_ROOT/config/profile.yml" && "$DATA_ROOT" == "$PROJECT_DIR" ]]; then
     {
       printf '\n\n---\n\n'
       printf '## Runtime profile\n\n'

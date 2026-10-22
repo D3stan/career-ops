@@ -8,6 +8,7 @@
 #   ./cops scan
 #   ./cops node generate-pdf.mjs cv.html output/cv.pdf
 #   ./cops shell                     # interactive bash
+#   ./cops bash -c 'ls reports'      # bash one-liner
 #   ./cops up | down | rebuild | logs
 #
 # Anything not matching a known subcommand is forwarded to npm run <subcommand>
@@ -48,7 +49,7 @@ case "${1:-}" in
     docker compose logs -f "$@"
     exit 0
     ;;
-  shell|bash)
+  shell)
     ensure_up
     exec docker compose exec -it "$SERVICE" bash
     ;;

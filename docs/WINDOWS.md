@@ -64,7 +64,7 @@ If you cloned **before v1.26.0**, your working tree can still hold the CRLF vers
 batch/batch-runner.sh: line 2: syntax error near unexpected token `$'{\r''
 ```
 
-Renormalize once:
+Renormalize once. `git reset --hard` replaces every tracked file with its committed version, so an edit you made to a tracked file and have not committed is lost, for example a mode or template you changed in place. Commit it or copy it somewhere else first. Your own data (`cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml`, and the files you add under `data/` and `reports/`) is gitignored and untracked, so the reset leaves it alone. Ignoring a path does not protect a file Git already tracks, so anything listed by `git ls-files` is restored from `HEAD` like the rest.
 
 ```powershell
 git rm --cached -r .
